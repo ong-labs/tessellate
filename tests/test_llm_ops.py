@@ -11,7 +11,15 @@ exposing only `.invoke(messages)`, and `sleep_fn` is always a no-op so
 import pytest
 
 import llm
-from llm import LLMCallFailed, check_budget, get_planner_chat_model, invoke_with_retry, resolve_planner_model
+from llm import (
+    LLMCallFailed,
+    check_budget,
+    get_fallback_chat_model,
+    get_planner_chat_model,
+    invoke_with_retry,
+    invoke_with_retry_and_fallback,
+    resolve_planner_model,
+)
 
 
 def test_get_planner_chat_model_defaults_to_local_ollama_when_env_unset(monkeypatch):
@@ -288,3 +296,90 @@ def test_check_budget_ignores_entries_with_no_cost_data(monkeypatch):
     status = check_budget(usage)
 
     assert status.exceeded is True  # the one entry with real cost data alone already exceeds 0.01
+
+
+# --- Cross-provider fallback ---------------------------------------------
+
+
+def test_get_fallback_chat_model_is_none_when_primary_is_already_local_default(monkeypatch):
+    monkeypatch.delenv("AUTOCIM_PLANNER_MODEL", raising=False)
+    assert get_fallback_chat_model() is None
+
+
+def test_get_fallback_chat_model_builds_local_default_when_primary_is_a_distinct_provider(monkeypatch):
+    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+    captured = {}
+    monkeypatch.setattr(llm, "init_chat_model", lambda model, **kwargs: captured.update(model=model) or "fake-fallback")
+
+    result = get_fallback_chat_model()
+
+    assert captured["model"] == "ollama:qwen2.5:7b"
+    assert result == "fake-fallback"
+
+
+def test_get_fallback_chat_model_returns_none_instead_of_raising_when_it_cannot_be_built(monkeypatch):
+    """Callers build the fallback *before* attempting the primary call, so
+    a fallback that can't even be constructed (e.g. langchain-ollama not
+    installed) must degrade to "no fallback available" rather than take
+    down an otherwise-healthy primary provider."""
+    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+
+    def _raise(model, **kwargs):
+        raise ImportError("no ollama package here")
+
+    monkeypatch.setattr(llm, "init_chat_model", _raise)
+
+    assert get_fallback_chat_model() is None
+
+
+def test_invoke_with_retry_and_fallback_never_touches_fallback_when_primary_succeeds():
+    primary = _FailNTimesThenSucceed([], _FakeResponseWithUsage())
+    fallback = _AlwaysRaises(RuntimeError("should never be called"))
+
+    _, record = invoke_with_retry_and_fallback(
+        primary, fallback, ["hi"], node="planner", iteration=1, max_retries=1, sleep_fn=_no_sleep
+    )
+
+    assert fallback.calls == 0
+    assert record.provider_fallback_from is None
+
+
+def test_invoke_with_retry_and_fallback_reraises_primary_failure_when_no_fallback_given():
+    primary = _AlwaysRaises(RuntimeError("503 service unavailable"))
+
+    with pytest.raises(LLMCallFailed) as exc_info:
+        invoke_with_retry_and_fallback(
+            primary, None, ["hi"], node="planner", iteration=1, max_retries=2, base_delay=0.01, sleep_fn=_no_sleep
+        )
+
+    assert "503" in exc_info.value.record.error
+    assert exc_info.value.record.provider_fallback_from is None
+
+
+def test_invoke_with_retry_and_fallback_switches_provider_after_primary_exhausts_retries():
+    primary = _AlwaysRaises(RuntimeError("503 service unavailable"))
+    fallback = _FailNTimesThenSucceed([], _FakeResponseWithUsage())
+
+    response, record = invoke_with_retry_and_fallback(
+        primary, fallback, ["hi"], node="planner", iteration=1, max_retries=2, base_delay=0.01, sleep_fn=_no_sleep
+    )
+
+    assert fallback.calls == 1
+    assert record.succeeded is True
+    assert record.provider_fallback_from is not None
+    assert "503" in record.provider_fallback_from
+
+
+def test_invoke_with_retry_and_fallback_raises_combined_error_when_both_providers_fail():
+    primary = _AlwaysRaises(RuntimeError("503 service unavailable"))
+    fallback = _AlwaysRaises(RuntimeError("connection refused"))
+
+    with pytest.raises(LLMCallFailed) as exc_info:
+        invoke_with_retry_and_fallback(
+            primary, fallback, ["hi"], node="planner", iteration=1, max_retries=2, base_delay=0.01, sleep_fn=_no_sleep
+        )
+
+    assert "503" in exc_info.value.record.error
+    assert "connection refused" in exc_info.value.record.error
