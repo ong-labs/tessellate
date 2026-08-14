@@ -1,0 +1,16 @@
+# Docker-only extras -- installed on top of requirements.txt (see Dockerfile).
+# Not in requirements.txt itself: hwcomponents-neurosim compiles NeuroSim's
+# real C++ source via `make`/`g++` at install time, which a bare pip/no-C++-
+# toolchain environment (e.g. this project's own Windows dev machine) can't
+# do -- Docker's python:3.13-slim + build-essential (Dockerfile) can.
+-r requirements.txt
+# tools/precision_check.py's real DAC (RowDrivers) and crossbar-MAC
+# (MemoryCell) energy models -- literature-characterized NeuroSim device
+# models, replacing tools/cim_physics.py's analytical placeholder for those
+# two terms the same way hwcomponents-adc already replaced the ADC term.
+hwcomponents-neurosim==1.0.43
+# tools/precision_check.py's real SRAM buffer-staging energy model
+# (hwcomponents_cacti.SRAM) -- ships a pre-built Linux binary (no compile
+# step) but imports the POSIX-only `fcntl` module, so it fails to import
+# at all on Windows; Docker's Linux image doesn't have that problem.
+hwcomponents-cacti==1.0.40
