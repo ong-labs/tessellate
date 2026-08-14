@@ -265,10 +265,10 @@ def parse_args() -> argparse.Namespace:
             "whenever a run's numbers have to line up with "
             "tools/baseline_compare.py or tools/optuna_compare.py: those "
             "never learn, so a session that inherits a learned calibration "
-            "factor reports energy on a different scale (measured: 414.37x "
-            "literature vs 51.85x learned, an 8x gap on identical hardware) "
-            "and skips LHS warm-up entirely when stored candidates seed its "
-            "history."
+            "factor reports energy on a different scale (measured on "
+            "cim_v1_128x128: 166.93x literature vs 51.85x learned, a 3.2x "
+            "gap on identical hardware) and skips LHS warm-up entirely when "
+            "stored candidates seed its history."
         ),
     )
     parser.add_argument(
@@ -1459,6 +1459,39 @@ def _persist_long_term_learnings(
     model_store.put_pareto_solutions(pareto_key, {"candidates": front})
 
 
+# How far the two independent calibration sources may drift apart before
+# run_session says so out loud. They answer the same question ("how wrong is
+# tools/cim_physics.py's absolute energy scale for this hw_spec_id?") from
+# different evidence -- a published pJ/MAC figure (tools/calibration.py) vs.
+# this project's own Stage-2 re-check (tools/precision_check.py) -- so a
+# large gap means every energy number in the run shifts by that factor
+# depending purely on which source happened to be available, which a
+# researcher reading the report must know. 2x is a deliberately loose bar:
+# these are order-of-magnitude corrections, so ordinary disagreement is
+# expected and only a gap big enough to change a conclusion is worth a line.
+_CALIBRATION_DISAGREEMENT_WARN_RATIO = 2.0
+
+
+def _warn_on_calibration_disagreement(bootstrap_factor: Optional[float], learned_factor: Optional[float]) -> None:
+    """Prints one line when the learned factor that just replaced the
+    literature bootstrap disagrees with it by more than
+    `_CALIBRATION_DISAGREEMENT_WARN_RATIO`. Reporting only -- neither factor
+    is altered, and which one wins is unchanged (the learned one, as
+    before): the gap was previously invisible unless someone diffed two runs'
+    energy columns and worked out why they were on different scales."""
+    if not bootstrap_factor or not learned_factor:
+        return
+    ratio = max(bootstrap_factor, learned_factor) / min(bootstrap_factor, learned_factor)
+    if ratio < _CALIBRATION_DISAGREEMENT_WARN_RATIO:
+        return
+    print(
+        f"[calibration] 주의: 문헌 기반 보정계수({bootstrap_factor:.2f})와 학습된 보정계수"
+        f"({learned_factor:.2f})가 {ratio:.1f}배 차이납니다 -- 이번 실행은 학습된 계수를 사용하므로 "
+        "energy_pj 수치를 문헌 부트스트랩만 쓰는 결과(tools/baseline_compare.py, "
+        "tools/optuna_compare.py)와 직접 비교할 수 없습니다. 비교가 필요하면 --ignore-learned-state를 쓰세요."
+    )
+
+
 def _describe_calibration_status(calibration_provenance: Dict[str, Any], hw_spec_id: str) -> str:
     """One-line summary of how (or whether) `hw_spec_id` got calibrated --
     printed at fresh-session start so a researcher never has to dig into
@@ -1622,8 +1655,12 @@ def run_session(
         # needs fewer (or zero) new LHS samples before the surrogate phase.
         learned_calibration = None if ignore_learned_state else hw_store.get_calibration_factors(hw_config.hw_spec_id)
         if learned_calibration:
+            bootstrap_factor = resumable_input["calibration_factors"].get(hw_config.hw_spec_id)
             resumable_input["calibration_factors"] = merge_dicts(resumable_input["calibration_factors"], learned_calibration)
             print(f"[long-term] 이전 실행에서 학습된 보정계수를 불러왔습니다: hw_spec_id={hw_config.hw_spec_id!r}")
+            _warn_on_calibration_disagreement(
+                bootstrap_factor, learned_calibration.get(hw_config.hw_spec_id)
+            )
         learned_solutions = (
             None if ignore_learned_state else model_store.get_pareto_solutions(_pareto_store_key(model_id, hw_config.hw_spec_id))
         )
@@ -1634,9 +1671,22 @@ def run_session(
             )
         if learned_solutions and learned_solutions.get("candidates"):
             resumable_input["candidate_history"] = list(learned_solutions["candidates"])
+            # Continue numbering past the highest iteration the stored
+            # candidates already claim, exactly like the parallel warm-up
+            # branch below does with its own count. Without this,
+            # iteration_count stayed 0, so @planner's first call re-issued
+            # iteration 1 -- a number a loaded candidate already used --
+            # and tools/dashboard.py's _iteration_rows (which joins
+            # candidate_history against planner_decisions *by* iteration)
+            # then attached this run's rationale to the previous run's
+            # candidate as well as to the real one.
+            resumable_input["iteration_count"] = max(
+                (c.get("iteration") or 0) for c in learned_solutions["candidates"]
+            )
             print(
                 f"[long-term] 이전 실행에서 찾은 Pareto 후보 {len(learned_solutions['candidates'])}개를 "
-                f"불러왔습니다: model_id={model_id!r}"
+                f"불러왔습니다: model_id={model_id!r} (반복 번호는 "
+                f"{resumable_input['iteration_count'] + 1}부터 이어집니다)"
             )
 
         print(
