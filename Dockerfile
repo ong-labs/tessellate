@@ -7,6 +7,13 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
+# hwcomponents-neurosim (requirements-docker.txt) compiles NeuroSim's real
+# C++ source via `make`/`g++` at `pip install` time -- python:3.13-slim has
+# neither; build-essential provides both. Not needed by requirements.txt's
+# own packages, only by this Docker-only extra (see tools/precision_check.py).
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 # Which torch/torchvision wheel (CPU-only vs CUDA, multi-GB) you get depends
 # entirely on which index you install from -- never rely on a bare `pip
 # install` to pick the right one. Installed first, explicitly from the
@@ -14,9 +21,9 @@ WORKDIR /app
 # comment above) at the exact pinned version from requirements.txt, so the
 # later full install is a no-op for these two packages instead of pulling a
 # different, unwanted wheel.
-COPY requirements.txt .
+COPY requirements.txt requirements-docker.txt .
 RUN pip install --no-cache-dir torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements-docker.txt
 
 COPY . .
 
