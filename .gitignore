@@ -59,3 +59,5 @@ venv/
 # OS junk
 .DS_Store
 Thumbs.db
+# 시연 산출물 -- 노트북 실행 시 재생성됨
+notebooks/demo_dashboard.html
