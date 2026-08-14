@@ -257,13 +257,13 @@ def _pareto_legend_html() -> str:
         '<span class="legend-item"><span class="legend-swatch" style="background:#5b9dff"></span>'
         f'{_bi("Pareto rank 1 (on current front)", "파레토 랭크 1 (현재 프론트)")}</span>'
         '<span class="legend-item"><span class="legend-swatch" style="background:#5c6b7e"></span>'
-        f'{_bi("Not on current front (dominated)", "현재 프론트에 속하지 않음 (열세 후보)")}</span>'
+        f'{_bi("Not on current front (dominated)", "현재 프론트에 속하지 않음 (피지배 후보)")}</span>'
         '<span class="legend-item"><span class="legend-swatch" '
         'style="background:transparent;border:1.5px solid #5c6b7e"></span>'
-        f'{_bi("Hollow: LHS warm-up (unordered samples)", "빈 원: LHS 워밍업 (순서 없는 샘플)")}</span>'
+        f'{_bi("Hollow: LHS warm-up (unordered samples)", "빈 원: LHS 워밍업 (표본 간 순서 없음)")}</span>'
         '<span class="legend-item"><span class="legend-swatch" '
         'style="background:#4a6b8a;border-radius:0;height:2px"></span>'
-        f'{_bi("Line: surrogate-guided search order", "선: 서로게이트 탐색 순서")}</span>'
+        f'{_bi("Line: surrogate-guided search order", "실선: 서로게이트 기반 탐색 순서")}</span>'
         "</div>"
     )
 
@@ -319,7 +319,7 @@ def _warmup_group_html(group: List[Dict[str, Any]]) -> str:
     dashboard's EN/KO toggle's same "don't lengthen the page" approach."""
     first, last = group[0]["iteration"], group[-1]["iteration"]
     summary_en = f"Warm-up batch (iterations {first}-{last}, {len(group)} candidates, no LLM confirmation)"
-    summary_ko = f"워밍업 배치 (반복 {first}-{last}, {len(group)}개 후보, LLM 확인 없음)"
+    summary_ko = f"워밍업 배치 (반복 {first}-{last}, {len(group)}개 후보, LLM 개입 없음)"
     inner_rows = "\n".join(_row_html(r) for r in group)
     return (
         '<tr class="warmup-group-row">'
@@ -383,7 +383,7 @@ def _calibration_section_html(state: AutoCIMState) -> str:
         warn_ko = (
             f"&#9888; hw_spec_id={hw_spec_id_esc}는 <strong>캘리브레이션되지 않았습니다</strong> -- 이 하드웨어 "
             "구성과 정확히 일치하는 공개 문헌 참조값이 없습니다 (tools/calibration.py). 아래 energy_pj/"
-            "latency_ns 수치는 정밀 시뮬레이션이나 실측 대비 검증되지 않은, 분석적인 order-of-magnitude "
+            "latency_ns 수치는 정밀 시뮬레이션이나 실측 대비 검증되지 않은, 자릿수 수준의 해석적 "
             "추정값(tools/cim_physics.py)입니다. <em>이번 실행 내에서</em> 후보끼리 비교하는 용도로는 "
             "안전하지만, 절대값을 검증된 벤치마크로 취급하지 마십시오."
         )
@@ -402,12 +402,14 @@ def _calibration_section_html(state: AutoCIMState) -> str:
             "placeholders otherwise (tools/precision_check.py)</em>."
         )
         precision_ok_ko = (
-            f"&#10003; hw_spec_id={hw_spec_id_esc}는 캘리브레이션되었습니다: 분석적 에너지 추정값을 이번 실행 "
-            f"자체의 2단계 정밀 재검증 결과({raw_energy} &rarr; {precise_energy} pJ, iteration "
-            f"{provenance.get('iteration')}) 대비 <strong>{factor:.4f}배</strong>로 보정했습니다 -- <em>ADC 에너지는 "
-            "항상 실제 문헌 기반 모델(hwcomponents_adc)이고, DAC/크로스바-MAC/SRAM 버퍼 에너지는 이번 실행이 "
-            "해당 Docker 전용 패키지(hwcomponents_neurosim/hwcomponents_cacti)가 설치된 환경에서 돌았을 때만 "
-            "실제 소자 모델이며, 그렇지 않으면 analytical 자리 표시자입니다(tools/precision_check.py)</em>."
+            f"&#10003; hw_spec_id={hw_spec_id_esc}는 <strong>보정 완료</strong> 상태입니다. 해석적 에너지 "
+            f"추정값을 본 실행에서 자체 수행한 2단계 정밀 재검증 결과({raw_energy} &rarr; {precise_energy} pJ, "
+            f"iteration {provenance.get('iteration')})에 맞추어 <strong>{factor:.4f}배</strong>로 보정하였습니다. "
+            "<em>ADC 에너지는 모든 환경에서 문헌 기반 실측 모델(hwcomponents_adc)을 사용합니다. 반면 "
+            "DAC/크로스바-MAC/SRAM 버퍼 에너지는 Docker 전용 패키지"
+            "(hwcomponents_neurosim/hwcomponents_cacti)가 설치된 환경에서 실행한 경우에 한하여 실제 소자 "
+            "모델이 적용되며, 그 외의 환경에서는 해석적 자리 표시자로 대체됩니다"
+            "(tools/precision_check.py).</em>"
         )
         return f'<p class="calib-ok">{_bi(precision_ok_en, precision_ok_ko)}</p>'
 
@@ -420,7 +422,7 @@ def _calibration_section_html(state: AutoCIMState) -> str:
         f"<em>{source}</em>."
     )
     ok_ko = (
-        f"&#10003; hw_spec_id={hw_spec_id_esc}는 캘리브레이션되었습니다: 분석적 에너지 추정값을 실제 공개된 "
+        f"&#10003; hw_spec_id={hw_spec_id_esc}는 캘리브레이션되었습니다: 해석적 에너지 추정값을 실제 공개된 "
         f"참조값({ref_value} pJ/MAC) 대비 <strong>{factor:.4f}배</strong>로 보정했습니다 -- <em>{source}</em>."
     )
     caveat_html = ""
@@ -579,9 +581,9 @@ def render_dashboard_html(state: AutoCIMState) -> str:
   {f'<span class="chip status-pending">{_bi("low-confidence conclusion", "낮은 신뢰도 종결")} <strong>{_bi("review before trusting", "신뢰 전 검토 필요")}</strong></span>' if low_confidence else ""}
 </div>
 <p class="summary">{_bi(llm_summary_en, llm_summary_ko)}</p>
-{f'<p class="calib-warning">{_bi("This session gave up without meeting every configured target -- the reported candidate is just the best one the search tried, not a real convergence.", "이 세션은 설정된 목표를 모두 충족하지 못한 채 종료됐습니다 -- 보고된 후보는 탐색이 시도한 것 중 최선일 뿐, 실제 수렴이 아닙니다.")}</p>' if low_confidence else ""}
+{f'<p class="calib-warning">{_bi("This session gave up without meeting every configured target -- the reported candidate is just the best one the search tried, not a real convergence.", "이 세션은 설정된 목표를 모두 충족하지 못한 채 종료되었습니다 -- 보고된 후보는 탐색이 시도한 것 중 최선일 뿐, 실제 수렴이 아닙니다.")}</p>' if low_confidence else ""}
 
-<h2>{_bi("Search progress", "검색 진행 상황")}</h2>
+<h2>{_bi("Search progress", "탐색 진행 상황")}</h2>
 {_search_phase_summary_html(rows)}
 
 <h2>{_bi("Calibration / precision confidence", "캘리브레이션 / 정밀도 신뢰도")}</h2>
@@ -603,7 +605,7 @@ def render_dashboard_html(state: AutoCIMState) -> str:
 <th>latency_ms</th>
 <th>pareto_rank</th>
 <th>{_bi("converged", "수렴 여부")}</th>
-<th>{_bi("rationale", "근거")}</th>
+<th>{_bi("rationale", "판단 근거")}</th>
 </tr></thead>
 <tbody>
 {_table_rows_html(rows)}
