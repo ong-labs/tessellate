@@ -8,7 +8,7 @@ covered elsewhere.
 
 from schemas.config import NoCTopology
 from schemas.tools import LayerBitConfig
-from tools.cim_physics import hop_distance, simulate_cim_profile, simulate_noc_mapping
+from tools.cim_physics import crossbar_passes, hop_distance, simulate_cim_profile, simulate_noc_mapping
 
 
 def _layer(weight_bits=6, activation_bits=6, pruning=0.0, name="l0"):
@@ -121,3 +121,110 @@ def test_buffer_energy_scales_linearly_with_sram_buffer_kb(good_hw_config):
     # crossbar/ADC/DAC-only quantity (tools/calibration.py calibrates
     # against it specifically because it excludes buffer energy).
     assert small_result["compute_energy_pj"] == large_result["compute_energy_pj"]
+
+
+# --- crossbar_passes: real weight-matrix -> array mapping -------------------
+
+
+def test_dense_layer_is_tiled_across_arrays_by_its_real_shape(good_hw_config):
+    """A 4608x512 matrix (resnet18's layer4 3x3x512x512 conv) on a 128x128
+    array needs ceil(4608/128) * ceil(512/128) = 36*4 = 144 passes, not 1."""
+    assert crossbar_passes(4608, 512, 1, good_hw_config) == 144
+
+
+def test_a_matrix_smaller_than_the_array_still_costs_one_pass(good_hw_config):
+    assert crossbar_passes(27, 32, 1, good_hw_config) == 1
+
+
+def test_depthwise_groups_are_packed_not_charged_one_array_each(good_hw_config):
+    """A 3x3 depthwise conv over 960 channels is block-diagonal: 9 rows and
+    1 column per group, so 128//9 = 14 groups pack into one array ->
+    ceil(960/14) = 69 passes. Charging one array per group (7x the arrays,
+    960) is the naive mapping this deliberately does not assume -- see
+    crossbar_passes' docstring."""
+    assert crossbar_passes(9, 960, 960, good_hw_config) == 69
+
+
+def test_a_group_larger_than_the_array_falls_back_to_per_group_tiling(good_hw_config):
+    """rows > crossbar_rows can't be packed at all, so each group is tiled
+    on its own rather than silently reported as a single cheap pass."""
+    assert crossbar_passes(256, 8, 4, good_hw_config) == 2 * 1 * 4
+
+
+def test_column_pruning_reduces_crossbar_passes(good_hw_config):
+    """Structured column pruning physically removes output channels, so it
+    must shrink the mapped matrix -- without this, pruning was a pure
+    accuracy cost the multi-objective search had no reason to ever pick."""
+    unpruned = crossbar_passes(4608, 512, 1, good_hw_config, pruning_ratio=0.0)
+    pruned = crossbar_passes(4608, 512, 1, good_hw_config, pruning_ratio=0.5)
+
+    assert pruned < unpruned
+    assert pruned == 36 * 2  # 512 cols -> 256 -> 2 column-tiles instead of 4
+
+
+# --- shape-aware profiling --------------------------------------------------
+
+
+_RESNET_LAYER4_SHAPES = {"layer4.1": [(4608, 512, 1), (4608, 512, 1)]}
+
+
+def test_profile_without_shapes_keeps_the_one_array_per_entry_fallback(good_hw_config):
+    """tools/calibration.py's synthetic probe layer really is a single full
+    array, so the shape-free call must keep costing exactly one pass."""
+    one_entry = simulate_cim_profile(good_hw_config, [_layer(name="layer4.1")])
+    two_entries = simulate_cim_profile(good_hw_config, [_layer(name="a"), _layer(name="b")])
+
+    assert two_entries["compute_energy_pj"] == round(one_entry["compute_energy_pj"] * 2, 6)
+
+
+def test_real_shapes_charge_a_stage_all_of_its_layers(good_hw_config):
+    """One stage holds several real layers (resnet18's layer4.1 is two
+    3x3x512x512 convs = 288 passes); charging it one array understated the
+    stage by that factor."""
+    blind = simulate_cim_profile(good_hw_config, [_layer(name="layer4.1")])
+    real = simulate_cim_profile(good_hw_config, [_layer(name="layer4.1")], stage_weight_shapes=_RESNET_LAYER4_SHAPES)
+
+    assert real["compute_energy_pj"] == round(blind["compute_energy_pj"] * 288, 6)
+
+
+def test_an_unknown_stage_name_falls_back_instead_of_guessing(good_hw_config):
+    """A stage with no resolvable shape must cost the documented fallback
+    of one pass, never an invented shape."""
+    blind = simulate_cim_profile(good_hw_config, [_layer(name="not_a_real_stage")])
+    real = simulate_cim_profile(
+        good_hw_config, [_layer(name="not_a_real_stage")], stage_weight_shapes=_RESNET_LAYER4_SHAPES
+    )
+
+    assert real["compute_energy_pj"] == blind["compute_energy_pj"]
+
+
+def test_pruning_lowers_profiled_energy_once_shapes_are_known(good_hw_config):
+    unpruned = simulate_cim_profile(
+        good_hw_config, [_layer(name="layer4.1", pruning=0.0)], stage_weight_shapes=_RESNET_LAYER4_SHAPES
+    )
+    pruned = simulate_cim_profile(
+        good_hw_config, [_layer(name="layer4.1", pruning=0.5)], stage_weight_shapes=_RESNET_LAYER4_SHAPES
+    )
+
+    assert pruned["compute_energy_pj"] < unpruned["compute_energy_pj"]
+
+
+def test_noc_tiles_needed_counts_real_arrays_not_layer_entries(good_hw_config):
+    mapping = simulate_noc_mapping(
+        good_hw_config, [_layer(name="layer4.1")], stage_weight_shapes=_RESNET_LAYER4_SHAPES
+    )
+
+    assert mapping["tiles_needed"] == 288
+    # 288 tiles on a 16-tile chip is a real overflow, and tile_utilization
+    # is capped at 1.0 -- it must report saturation, not a comfortable 0.06.
+    assert mapping["tile_utilization"] == 1.0
+
+
+def test_noc_transfer_latency_stays_per_layer_boundary(good_hw_config):
+    """Intra-layer tiles merge partial sums locally; only layer-to-layer
+    activations cross the NoC, so a multi-tile layer must not inflate
+    transfer latency (see simulate_noc_mapping's docstring)."""
+    blind = simulate_noc_mapping(good_hw_config, [_layer(name="layer4.1")])
+    real = simulate_noc_mapping(good_hw_config, [_layer(name="layer4.1")], stage_weight_shapes=_RESNET_LAYER4_SHAPES)
+
+    assert real["noc_latency_ms"] == blind["noc_latency_ms"]
