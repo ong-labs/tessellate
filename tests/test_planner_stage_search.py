@@ -195,3 +195,39 @@ def test_random_search_strategy_varies_point_across_iterations(monkeypatch, stat
     state["candidate_history"] = state["candidate_history"] + [state["candidate_history"][-1]]
     second_points, _ = planner_module._propose_stage_points(state, stage_names)
     assert first_points != second_points
+
+
+# --- pruning snap wiring ----------------------------------------------------
+
+
+def test_points_to_stage_configs_without_context_keeps_the_raw_clamp():
+    """Callers with no resolved model/hardware (tests, optuna_compare's own
+    search space) must keep the pre-snap behavior exactly."""
+    configs = planner_module.points_to_stage_configs([(4.4, 0.2)], ["layer4.1"])
+
+    assert configs[0].column_pruning_ratio == 0.2
+    assert configs[0].weight_bits == 4
+
+
+def test_points_to_stage_configs_snaps_pruning_when_given_real_context(registered_hw_config):
+    """With real shapes+hardware, a pruning ratio that removes no crossbar
+    array is dropped to one that does (tools/cim_physics.py's
+    snap_pruning_ratio) -- weight_bits rounding is unaffected."""
+    from middleware import get_hw_config
+
+    hw = get_hw_config(registered_hw_config.hw_spec_id)
+    shapes = {"wide": [(4608, 512, 1)], "narrow": [(147, 64, 1)]}
+
+    configs = planner_module.points_to_stage_configs(
+        [(4.4, 0.2), (6.6, 0.3)], ["wide", "narrow"], hw, shapes
+    )
+
+    assert configs[0].column_pruning_ratio == 0.0  # 0.2 removes no array on a 512-col layer
+    assert configs[1].column_pruning_ratio == 0.0  # 64-col layer can never save one
+    assert [c.weight_bits for c in configs] == [4, 7]
+
+
+def test_snapping_context_degrades_to_none_for_an_unresolvable_model():
+    """An unimportable custom --model-id must fall back to the raw clamp,
+    not fail the planner -- @tuner already reports that error."""
+    assert planner_module._snapping_context("no.such.module:build", "whatever") == (None, None)
