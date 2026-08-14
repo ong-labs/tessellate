@@ -41,6 +41,20 @@ call each iteration and skips the call entirely (falling back to the
 search-point suggestion, same as any other LLM failure) once a configured
 `AUTOCIM_LLM_MAX_TOTAL_COST_USD`/`AUTOCIM_LLM_MAX_TOTAL_TOKENS` budget for
 the run is spent.
+
+`get_fallback_chat_model`/`invoke_with_retry_and_fallback` add one more
+layer on top of the retry/budget machinery above: `invoke_with_retry` only
+ever talks to one provider, so a cloud provider that stays down (or rate
+limits) through every retry attempt still falls all the way back to
+`nodes/planner.py`'s search-point suggestion, even though a perfectly usable
+local model is one config swap away. `get_fallback_chat_model` resolves that
+swap target (the same local default `resolve_planner_model` already falls
+back to at config time for a missing API key) -- `None` when the resolved
+primary model already *is* the local default, since there's nothing distinct
+left to try. `invoke_with_retry_and_fallback` retries the primary model
+first (unchanged `invoke_with_retry` behavior); only once *that* is
+exhausted does it retry the fallback model the same way, so a fallback
+attempt costs nothing when the primary succeeds.
 """
 
 from __future__ import annotations
@@ -102,6 +116,29 @@ def resolve_planner_model() -> Tuple[str, Optional[str]]:
 def get_planner_chat_model() -> BaseChatModel:
     model, _reason = resolve_planner_model()
     return init_chat_model(model, temperature=0)
+
+
+def get_fallback_chat_model() -> Optional[BaseChatModel]:
+    """A chat model for the local default provider, to fail over to when
+    the resolved primary model keeps failing at *runtime* (distinct from
+    `resolve_planner_model`'s config-time fallback for a missing API key,
+    which already resolves the local default as the primary model in that
+    case -- there'd be nothing left to fail over to). Returns None when the
+    resolved primary model already is the local default.
+
+    Never raises: a fallback that can't even be constructed (e.g.
+    `langchain-ollama` not installed in this environment) must not take
+    down an otherwise-healthy primary provider, since callers build this
+    *before* attempting the primary call. Returns None in that case, which
+    `invoke_with_retry_and_fallback` already treats as "no distinct
+    fallback available" -- i.e. exactly the pre-fallback behavior."""
+    model, _reason = resolve_planner_model()
+    if model == _DEFAULT_LOCAL_MODEL:
+        return None
+    try:
+        return init_chat_model(_DEFAULT_LOCAL_MODEL, temperature=0)
+    except Exception:  # noqa: BLE001 -- see docstring: never break the primary path
+        return None
 
 
 # =============================================================================
@@ -170,6 +207,12 @@ class LLMCallRecord:
     total_tokens: Optional[int] = None
     estimated_cost_usd: Optional[float] = None
     error: Optional[str] = None
+    # Set only when this record describes a fallback-provider call that
+    # succeeded (or itself failed) after the primary provider was exhausted
+    # -- the primary's own failure reason, kept here so llm_usage still
+    # shows a provider switch happened instead of looking like an ordinary
+    # single-provider call.
+    provider_fallback_from: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -183,6 +226,7 @@ class LLMCallRecord:
             "total_tokens": self.total_tokens,
             "estimated_cost_usd": self.estimated_cost_usd,
             "error": self.error,
+            "provider_fallback_from": self.provider_fallback_from,
         }
 
 
@@ -427,3 +471,52 @@ def invoke_with_retry(
         error=f"{type(last_exc).__name__}: {last_exc}" if last_exc is not None else "unknown error",
     )
     raise LLMCallFailed(record) from last_exc
+
+
+def invoke_with_retry_and_fallback(
+    primary_model: Any,
+    fallback_model: Optional[Any],
+    messages: List[Any],
+    *,
+    node: str,
+    iteration: int,
+    max_retries: Optional[int] = None,
+    base_delay: Optional[float] = None,
+    max_delay: Optional[float] = None,
+    sleep_fn: Callable[[float], None] = time.sleep,
+) -> Tuple[Any, LLMCallRecord]:
+    """`invoke_with_retry(primary_model, ...)`; if that raises `LLMCallFailed`
+    (the primary provider stayed down/rate-limited through every retry) and
+    `fallback_model` is not None (`get_fallback_chat_model()`), retries the
+    same messages against `fallback_model` the same way before giving up.
+    `fallback_model=None` (primary already is the local default -- nothing
+    distinct to fail over to) re-raises the primary's failure unchanged,
+    same as plain `invoke_with_retry`.
+
+    On a successful fallback call, the returned record is the fallback
+    call's own (its real attempts/latency/tokens), with
+    `provider_fallback_from` set to the primary's failure reason so
+    `llm_usage` still shows a provider switch happened. If the fallback also
+    fails, raises the fallback's `LLMCallFailed` with its record's `error`
+    describing both failures."""
+    try:
+        return invoke_with_retry(
+            primary_model, messages, node=node, iteration=iteration,
+            max_retries=max_retries, base_delay=base_delay, max_delay=max_delay, sleep_fn=sleep_fn,
+        )
+    except LLMCallFailed as primary_failure:
+        if fallback_model is None:
+            raise
+        try:
+            response, record = invoke_with_retry(
+                fallback_model, messages, node=node, iteration=iteration,
+                max_retries=max_retries, base_delay=base_delay, max_delay=max_delay, sleep_fn=sleep_fn,
+            )
+        except LLMCallFailed as fallback_failure:
+            fallback_failure.record.error = (
+                f"primary provider failed ({primary_failure.record.error}); "
+                f"fallback provider also failed ({fallback_failure.record.error})"
+            )
+            raise fallback_failure
+        record.provider_fallback_from = primary_failure.record.error
+        return response, record
