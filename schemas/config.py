@@ -19,6 +19,23 @@ class NoCTopology(str, Enum):
     CROSSBAR_BUS = "crossbar_bus"
 
 
+class CIMDeviceType(str, Enum):
+    """Crossbar cell device technology -- used only by tools.precision_check's
+    real hwcomponents_neurosim-based DAC/crossbar-MAC energy models
+    (Docker-only, see that module's docstring) to pick one of NeuroSim's
+    bundled NVMExplorer-fit .cell configs instead of its generic placeholder
+    cell. Restricted to the four technologies hwcomponents_neurosim actually
+    ships a real cell config for -- not every device technology
+    tools/calibration.py's KNOWN_REFERENCES cites (e.g. FeFET) has one.
+    STTRAM stands in for MRAM here: NeuroSim ships no separate generic-MRAM
+    cell, and STT-MRAM is the dominant real MRAM implementation."""
+
+    RRAM = "rram"
+    SRAM = "sram"
+    PCM = "pcm"
+    STTRAM = "sttram"
+
+
 class HWConfig(BaseModel):
     """Hardware constraint specification for a target CIM chip.
 
@@ -50,6 +67,23 @@ class HWConfig(BaseModel):
         default=None, ge=0, description="Std-dev of device-level conductance noise"
     )
     sram_buffer_kb: Optional[float] = Field(default=None, gt=0, description="Per-tile SRAM buffer size in KB")
+    tech_node_nm: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Process technology node in nanometers, used by tools.precision_check's real "
+        "hwcomponents_adc-based ADC energy model. None falls back to a documented placeholder "
+        "(tools/precision_check.py's _DEFAULT_TECH_NODE_NM), same honesty pattern as "
+        "device_noise_sigma/sram_buffer_kb -- not every hardware spec states its process node.",
+    )
+    device_type: Optional[CIMDeviceType] = Field(
+        default=None,
+        description="Crossbar cell device technology (RRAM/SRAM/PCM/STTRAM), used by "
+        "tools.precision_check's real hwcomponents_neurosim-based DAC/crossbar-MAC energy models "
+        "(Docker-only) to pick a real NVMExplorer-fit cell config. None falls back to NeuroSim's "
+        "generic placeholder cell, same honesty pattern as tech_node_nm -- not every hardware spec "
+        "states a device technology, and hwcomponents_neurosim doesn't ship a real config for every "
+        "technology tools/calibration.py's KNOWN_REFERENCES cites (e.g. FeFET).",
+    )
 
     model_config = {"frozen": True}
 
@@ -65,6 +99,18 @@ class ExecutionContext(BaseModel):
 
     session_id: str = Field(..., description="Unique id for this LangGraph run/thread")
     model_id: str = Field(..., description="Identifier for the target model, resolved externally")
+    dataset_id: Optional[str] = Field(
+        default=None,
+        description="Identifier for the target dataset, resolved externally (tools.qat's registry); "
+        "None uses the model's default dataset (built-in 'cifar10')",
+    )
     hw_spec_id: str = Field(..., description="Identifier for the target HWConfig, resolved externally")
+    run_seed: int = Field(
+        default=0,
+        description="This session's seed (state.py's run_seed) -- tools.qat.run_qat_tuning seeds torch's "
+        "RNG from it so training stochasticity (dropout, batch shuffling) is reproducible per (candidate, "
+        "run_seed), and independent replicates (tools/repeat_search.py) get genuinely different training "
+        "trajectories, not just a different label on the same one",
+    )
     iteration_count: int = Field(default=0, ge=0)
     user_id: Optional[str] = Field(default=None, description="Requesting researcher/user id, if applicable")
