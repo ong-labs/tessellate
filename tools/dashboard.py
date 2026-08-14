@@ -302,10 +302,6 @@ def _row_html(r: Dict[str, Any]) -> str:
     )
 
 
-def _is_warmup_row(r: Dict[str, Any]) -> bool:
-    return bool(_WARMUP_TAG_RE.match(str(r.get("search_tag") or "")))
-
-
 def _warmup_group_html(group: List[Dict[str, Any]]) -> str:
     """Collapses a contiguous run of LHS warm-up rows into one
     <details>-backed summary row (native disclosure, no JS) instead of
