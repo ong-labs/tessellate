@@ -246,6 +246,18 @@ def run_parallel_warmup(
 
     resolved_max_workers = max_workers if max_workers is not None else min(n_warmup, os.cpu_count() or 1)
     resolved_max_workers = max(1, resolved_max_workers)
+    if resolved_max_workers > 1:
+        # tools/qat.py's run_qat_tuning seeds torch's *global* RNG, and the
+        # train loader's shuffling draws from it -- concurrent trials reseed
+        # it under each other, so per-candidate accuracy stops being
+        # reproducible from (stage_configs, run_seed) alone. Said out loud
+        # here rather than left for someone to discover by getting two
+        # different numbers from the same command.
+        print(
+            f"[warm-up] 주의: 워커 {resolved_max_workers}개로 병렬 실행합니다 -- 각 QAT 시행이 "
+            "torch 전역 RNG를 공유하므로 후보별 정확도가 실행마다 재현되지 않습니다. "
+            "재현 가능한 수치가 필요하면 --parallel-warmup-workers 1로 실행하세요."
+        )
 
     total = len(layer_configs_per_candidate)
     raw_metrics_by_index: List[Optional[Dict[str, Any]]] = [None] * total
