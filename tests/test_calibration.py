@@ -4,7 +4,8 @@ honestly uncalibrated (factor 1.0) for any HWConfig that doesn't exactly
 match a known reference.
 """
 
-from schemas.config import HWConfig, NoCTopology
+from schemas.calibration import CalibrationReference
+from schemas.config import CIMDeviceType, HWConfig, NoCTopology
 from schemas.tools import LayerBitConfig
 from tools.calibration import (
     KNOWN_REFERENCES,
@@ -65,7 +66,11 @@ def test_compute_calibration_factor_equals_reference_over_predicted_per_mac():
         activation_bits=_REFERENCE.weight_bits,
         column_pruning_ratio=0.0,
     )
-    predicted_energy_pj_per_mac = simulate_cim_profile(hw, [probe])["energy_pj"] / (hw.crossbar_rows * hw.crossbar_cols)
+    # compute_energy_pj (crossbar/ADC/DAC only), not the total energy_pj --
+    # published references never measure a host SRAM buffer's energy.
+    predicted_energy_pj_per_mac = simulate_cim_profile(hw, [probe])["compute_energy_pj"] / (
+        hw.crossbar_rows * hw.crossbar_cols
+    )
 
     factor = compute_calibration_factor(hw, _REFERENCE)
 
@@ -250,6 +255,15 @@ def test_fourth_and_fifth_references_are_distinguished_by_adc_bits_alone():
 
 
 # --- Sixth reference (Garg, Jia, Phadke & Yu 2026 FeFET, 64x64/4-bit-ADC) --
+#
+# Shares its (64, 64, 4-bit-ADC) key with the ninth reference (Dong/Sinangil
+# SRAM, added below) -- the one real collision in KNOWN_REFERENCES,
+# resolved by device_type. FeFET itself has no representable device_type
+# (schemas.config.CIMDeviceType has no FeFET member -- hwcomponents_neurosim
+# ships no FeFET cell), so it can no longer be reached by exact match now
+# that Dong coexists at this key: a device_type-unset query is honestly
+# ambiguous between them (see test_sixth_reference_key_is_ambiguous_without_
+# device_type below), not silently resolved to either.
 
 _REFERENCE_6 = KNOWN_REFERENCES[5]
 
@@ -272,10 +286,13 @@ def _hw6(**overrides) -> HWConfig:
     return HWConfig(**base)
 
 
-def test_bootstrap_returns_factor_for_sixth_reference_exact_match():
-    factors = bootstrap_calibration_factors(_hw6())
-    assert list(factors.keys()) == ["calib_test_hw_6"]
-    assert factors["calib_test_hw_6"] > 0
+def test_sixth_reference_key_is_ambiguous_without_device_type():
+    # _hw6() has no device_type set, and its (64, 64, 4-bit-ADC) key is now
+    # shared by two references (FeFET, unrepresentable device_type=None,
+    # and Dong/Sinangil SRAM, device_type=SRAM) -- find_matching_reference
+    # must refuse to guess between them rather than silently picking either.
+    assert find_matching_reference(_hw6()) is None
+    assert bootstrap_calibration_factors(_hw6()) == {}
 
 
 def test_six_references_do_not_cross_match():
@@ -284,7 +301,7 @@ def test_six_references_do_not_cross_match():
     assert find_matching_reference(_hw3()) is _REFERENCE_3
     assert find_matching_reference(_hw4()) is _REFERENCE_4
     assert find_matching_reference(_hw5()) is _REFERENCE_5
-    assert find_matching_reference(_hw6()) is _REFERENCE_6
+    assert find_matching_reference(_hw6()) is None  # ambiguous -- see test above
 
 
 # --- Seventh reference (Deaville, Zhang & Verma 2022, 256x512/6-bit-ADC/1-bit-weight, MRAM) --
@@ -322,7 +339,7 @@ def test_seven_references_do_not_cross_match():
     assert find_matching_reference(_hw3()) is _REFERENCE_3
     assert find_matching_reference(_hw4()) is _REFERENCE_4
     assert find_matching_reference(_hw5()) is _REFERENCE_5
-    assert find_matching_reference(_hw6()) is _REFERENCE_6
+    assert find_matching_reference(_hw6()) is None  # ambiguous -- see FeFET section above
     assert find_matching_reference(_hw7()) is _REFERENCE_7
 
 
@@ -361,9 +378,132 @@ def test_eight_references_do_not_cross_match():
     assert find_matching_reference(_hw3()) is _REFERENCE_3
     assert find_matching_reference(_hw4()) is _REFERENCE_4
     assert find_matching_reference(_hw5()) is _REFERENCE_5
-    assert find_matching_reference(_hw6()) is _REFERENCE_6
+    assert find_matching_reference(_hw6()) is None  # ambiguous -- see FeFET section above
     assert find_matching_reference(_hw7()) is _REFERENCE_7
     assert find_matching_reference(_hw8()) is _REFERENCE_8
+
+
+# --- Ninth reference (Dong, Sinangil et al. 2020, 64x64/4-bit-ADC/4-bit-weight,
+# SRAM -- restored at the same key as the sixth (FeFET) reference now that
+# device_type disambiguates them) --
+
+_REFERENCE_9 = KNOWN_REFERENCES[8]
+
+
+def _hw9(**overrides) -> HWConfig:
+    base = dict(
+        hw_spec_id="calib_test_hw_9",
+        crossbar_rows=_REFERENCE_9.crossbar_rows,
+        crossbar_cols=_REFERENCE_9.crossbar_cols,
+        num_tiles=16,
+        adc_bits=_REFERENCE_9.adc_bits,
+        dac_bits=8,
+        noc_topology=NoCTopology.MESH,
+        noc_link_bandwidth_gbps=10.0,
+        wire_resistance_ohm_per_um=0.05,
+        device_noise_sigma=0.05,
+        sram_buffer_kb=64.0,
+        device_type=_REFERENCE_9.device_type,
+    )
+    base.update(overrides)
+    return HWConfig(**base)
+
+
+def test_bootstrap_returns_factor_for_ninth_reference_exact_match():
+    factors = bootstrap_calibration_factors(_hw9())
+    assert list(factors.keys()) == ["calib_test_hw_9"]
+    assert factors["calib_test_hw_9"] > 0
+
+
+def test_ninth_reference_is_disambiguated_from_sixth_by_device_type():
+    # Same (64, 64, 4-bit-ADC) key as _hw6(), but device_type=SRAM picks out
+    # the Dong/Sinangil reference specifically instead of returning None.
+    assert find_matching_reference(_hw9()) is _REFERENCE_9
+    assert find_matching_reference(_hw9()) is not _REFERENCE_6
+
+
+def test_nine_references_do_not_cross_match():
+    assert find_matching_reference(_hw()) is _REFERENCE
+    assert find_matching_reference(_hw2()) is _REFERENCE_2
+    assert find_matching_reference(_hw3()) is _REFERENCE_3
+    assert find_matching_reference(_hw4()) is _REFERENCE_4
+    assert find_matching_reference(_hw5()) is _REFERENCE_5
+    assert find_matching_reference(_hw6()) is None  # ambiguous -- see FeFET section above
+    assert find_matching_reference(_hw7()) is _REFERENCE_7
+    assert find_matching_reference(_hw8()) is _REFERENCE_8
+    assert find_matching_reference(_hw9()) is _REFERENCE_9
+
+
+# --- find_matching_reference's device_type disambiguation, general contract
+# (synthetic references via monkeypatched KNOWN_REFERENCES -- exercises the
+# mechanism directly, independent of which real collisions currently exist
+# in KNOWN_REFERENCES) --
+
+
+def _synthetic_reference(device_type, weight_bits=4) -> CalibrationReference:
+    return CalibrationReference(
+        crossbar_rows=32,
+        crossbar_cols=32,
+        adc_bits=6,
+        weight_bits=weight_bits,
+        reference_energy_pj_per_mac=0.01,
+        source="synthetic test fixture, not a real citation",
+        device_type=device_type,
+    )
+
+
+def _synthetic_hw(**overrides) -> HWConfig:
+    base = dict(
+        hw_spec_id="calib_test_hw_synthetic",
+        crossbar_rows=32,
+        crossbar_cols=32,
+        num_tiles=16,
+        adc_bits=6,
+        dac_bits=8,
+        noc_topology=NoCTopology.MESH,
+        noc_link_bandwidth_gbps=10.0,
+    )
+    base.update(overrides)
+    return HWConfig(**base)
+
+
+def test_matching_reference_picks_the_device_type_matching_candidate_among_three(monkeypatch):
+    rram_ref = _synthetic_reference(CIMDeviceType.RRAM)
+    sram_ref = _synthetic_reference(CIMDeviceType.SRAM)
+    pcm_ref = _synthetic_reference(CIMDeviceType.PCM)
+    monkeypatch.setattr("tools.calibration.KNOWN_REFERENCES", [rram_ref, sram_ref, pcm_ref])
+
+    assert find_matching_reference(_synthetic_hw(device_type=CIMDeviceType.RRAM)) is rram_ref
+    assert find_matching_reference(_synthetic_hw(device_type=CIMDeviceType.SRAM)) is sram_ref
+    assert find_matching_reference(_synthetic_hw(device_type=CIMDeviceType.PCM)) is pcm_ref
+
+
+def test_matching_reference_is_none_when_queried_device_type_matches_no_tied_candidate(monkeypatch):
+    rram_ref = _synthetic_reference(CIMDeviceType.RRAM)
+    sram_ref = _synthetic_reference(CIMDeviceType.SRAM)
+    monkeypatch.setattr("tools.calibration.KNOWN_REFERENCES", [rram_ref, sram_ref])
+
+    # STTRAM matches neither tied candidate -- must not fall back to either.
+    assert find_matching_reference(_synthetic_hw(device_type=CIMDeviceType.STTRAM)) is None
+
+
+def test_matching_reference_is_none_when_device_type_unset_and_candidates_are_tied(monkeypatch):
+    rram_ref = _synthetic_reference(CIMDeviceType.RRAM)
+    sram_ref = _synthetic_reference(CIMDeviceType.SRAM)
+    monkeypatch.setattr("tools.calibration.KNOWN_REFERENCES", [rram_ref, sram_ref])
+
+    assert find_matching_reference(_synthetic_hw()) is None  # device_type defaults to None
+
+
+def test_matching_reference_ignores_device_type_when_only_one_candidate_shares_the_key(monkeypatch):
+    # A single reference at a key is returned regardless of device_type --
+    # matches this function's original behavior for every non-colliding key
+    # (most hw_configs never state a device_type at all).
+    lone_ref = _synthetic_reference(CIMDeviceType.RRAM)
+    monkeypatch.setattr("tools.calibration.KNOWN_REFERENCES", [lone_ref])
+
+    assert find_matching_reference(_synthetic_hw()) is lone_ref
+    assert find_matching_reference(_synthetic_hw(device_type=CIMDeviceType.SRAM)) is lone_ref
 
 
 # --- Approximate (nearest-reference, scaling-law) calibration -------------
@@ -408,6 +548,40 @@ def test_find_nearest_reference_returns_closest_by_distance_for_unmatched_hw():
     # No other reference should be strictly closer than the one returned.
     for reference in KNOWN_REFERENCES:
         assert distance <= _reference_distance(_unmatched_hw(), reference) + 1e-9
+
+
+def test_find_nearest_reference_prefers_device_type_match_among_tied_distances():
+    # Regression test for a real bug found via an actual end-to-end main.py
+    # run (not caught by find_matching_reference's own tests): _hw9() (the
+    # restored Dong/Sinangil SRAM reference's own shape, device_type=SRAM)
+    # is tied at distance 0.0 with _REFERENCE_6 (FeFET, device_type=None) --
+    # since find_nearest_reference is main.py's actual *default* path
+    # (allow_approximate_calibration=True), a naive min() would silently
+    # return whichever tied reference comes first in KNOWN_REFERENCES'
+    # list order (FeFET) regardless of hw.device_type, giving the wrong
+    # calibration factor for a hw_config that explicitly states SRAM.
+    nearest, distance = find_nearest_reference(_hw9())
+    assert nearest is _REFERENCE_9
+    assert nearest is not _REFERENCE_6
+    assert distance == 0.0
+
+    # And the two calibration paths (exact vs. approximate/default) must
+    # now agree, since bootstrap_approximate_calibration_factors's whole
+    # premise is "identical to the exact path whenever distance is 0".
+    assert bootstrap_approximate_calibration_factors(_hw9()) == bootstrap_calibration_factors(_hw9())
+
+
+def test_find_nearest_reference_ignores_device_type_when_hw_states_none(monkeypatch):
+    # No basis to prefer either tied candidate when hw doesn't state a
+    # device_type -- falls back to KNOWN_REFERENCES' list order (matches
+    # this function's original, pre-device_type tie-break behavior).
+    rram_ref = _synthetic_reference(CIMDeviceType.RRAM)
+    sram_ref = _synthetic_reference(CIMDeviceType.SRAM)
+    monkeypatch.setattr("tools.calibration.KNOWN_REFERENCES", [rram_ref, sram_ref])
+
+    nearest, distance = find_nearest_reference(_synthetic_hw())  # device_type unset
+    assert nearest is rram_ref  # first in list order
+    assert distance == 0.0
 
 
 def test_compute_approximate_calibration_factor_uses_reference_own_config_not_hw_config():
