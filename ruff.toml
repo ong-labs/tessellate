@@ -1,0 +1,16 @@
+# Ruff configuration. CI runs `ruff check .` (.github/workflows/ci.yml).
+#
+# Only per-file exceptions live here -- everything else stays on ruff's
+# defaults, which is what this project was already being linted against
+# before this file existed (default rule set E4/E7/E9/F; E501 line-length is
+# deliberately not part of it, matching the long explanatory comments this
+# codebase uses throughout).
+
+[lint.per-file-ignores]
+# notebooks/autocim_agent_demo.ipynb must set the AUTOCIM_QAT_* env vars and
+# put the project root on sys.path *before* importing any project module:
+# the notebook lives in notebooks/, so `import graph` fails until sys.path is
+# fixed, and tools/qat.py resolves its dataset-size env vars when the backend
+# is first built. Imports therefore cannot come first in that cell -- E402 is
+# inherent to the setup, not a style slip.
+"notebooks/*.ipynb" = ["E402"]
