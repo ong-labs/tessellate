@@ -131,11 +131,34 @@ def _search_phase_summary_html(rows: List[Dict[str, Any]]) -> str:
     return ""
 
 
-def _svg_pareto_chart(rows: List[Dict[str, Any]], width: int = 480, height: int = 320, pad: int = 40) -> str:
+def _is_warmup_row(row: Dict[str, Any]) -> bool:
+    return bool(_WARMUP_TAG_RE.match(str(row.get("search_tag") or "")))
+
+
+def _svg_pareto_chart(rows: List[Dict[str, Any]], width: int = 660, height: int = 380, pad: int = 52) -> str:
     """energy_pj (x) vs accuracy (y, inverted so higher accuracy trends
-    upward), one point per iteration, connected in iteration order so the
-    Pareto front's movement over the run is visible at a glance -- points
-    still on the current Pareto front (pareto_rank == 1) are highlighted.
+    upward), one point per iteration; points on the current Pareto front
+    (pareto_rank == 1) are highlighted.
+
+    **The trajectory line covers the search phase only.** Warm-up points are
+    Latin Hypercube samples -- deliberately spread across the space with no
+    meaningful order between them -- so joining them by iteration index drew
+    noise, not a trajectory: on a real 18-candidate session (15 warm-up) the
+    polyline ran 3401px across a 466px plot diagonal, crossing itself
+    roughly seven times. Warm-up is now drawn as unconnected hollow marks,
+    which also surfaces something the old chart hid: which candidates were
+    random exploration versus surrogate-guided search.
+
+    Only search-phase points and the final candidate carry a printed
+    iteration number. Labelling all 18 put 8 pairs of labels within 24px of
+    each other (closest 7.3px) on the same real session. Warm-up points are
+    deliberately left unlabelled for the same reason their line was dropped:
+    an LHS sample's index carries no information, so printing it is noise --
+    and front membership, the thing that *is* worth seeing, is already
+    carried by colour. (Labelling every Pareto-rank-1 point instead was
+    tried and rejected: 13 of these 18 candidates are rank 1, since the rank
+    is computed over three objectives, so it barely filtered anything.)
+    Every point still reports its full detail through the `<title>` tooltip.
 
     Axis label text is anchored in the margin outside the
     [pad, width-pad] x [pad, height-pad] plot rectangle (the y-axis label
@@ -163,26 +186,59 @@ def _svg_pareto_chart(rows: List[Dict[str, Any]], width: int = 480, height: int 
         return height - pad - (accuracy - acc_min) / (acc_max - acc_min) * (height - 2 * pad)
 
     ordered = sorted(plottable, key=lambda r: r["iteration"])
-    path = " ".join(f"{x(r['energy_pj']):.1f},{y(r['accuracy']):.1f}" for r in ordered)
+    searched = [r for r in ordered if not _is_warmup_row(r)]
+    last_iteration = ordered[-1]["iteration"]
+
+    # Plot frame + end-of-axis tick values: without them the axes carried no
+    # magnitude at all, so a reader could not tell 1.6M pJ from 16 pJ.
+    axis = (
+        f'<rect x="{pad}" y="{pad}" width="{width - 2 * pad}" height="{height - 2 * pad}" '
+        f'fill="none" stroke="#2b3a4a" stroke-width="1"/>'
+        f'<text x="{pad}" y="{height - pad + 16}" font-size="10" fill="#93a4b8" text-anchor="start">'
+        f"{e_min:,.0f}</text>"
+        f'<text x="{width - pad}" y="{height - pad + 16}" font-size="10" fill="#93a4b8" text-anchor="end">'
+        f"{e_max:,.0f}</text>"
+        f'<text x="{pad - 8}" y="{height - pad}" font-size="10" fill="#93a4b8" text-anchor="end">'
+        f"{acc_min:.3f}</text>"
+        f'<text x="{pad - 8}" y="{pad + 8}" font-size="10" fill="#93a4b8" text-anchor="end">{acc_max:.3f}</text>'
+    )
+
+    trajectory = ""
+    if len(searched) > 1:
+        path = " ".join(f"{x(r['energy_pj']):.1f},{y(r['accuracy']):.1f}" for r in searched)
+        trajectory = f'<polyline points="{path}" fill="none" stroke="#4a6b8a" stroke-width="1.5"/>'
 
     marks = []
     for r in ordered:
         cx, cy = x(r["energy_pj"]), y(r["accuracy"])
-        color = "#5b9dff" if r.get("pareto_rank") == 1 else "#5c6b7e"
+        on_front = r.get("pareto_rank") == 1
+        warmup = _is_warmup_row(r)
         tooltip = (
-            f"iter {r['iteration']}: energy={r['energy_pj']:.2f}pJ, accuracy={r['accuracy']:.3f}, "
-            f"rank={r.get('pareto_rank')}"
+            f"iter {r['iteration']} ({'warm-up' if warmup else 'search'}): "
+            f"energy={r['energy_pj']:,.2f}pJ, accuracy={r['accuracy']:.3f}, rank={r.get('pareto_rank')}"
         )
-        marks.append(
-            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="6" fill="{color}" opacity="0.9">'
-            f"<title>{html.escape(tooltip)}</title></circle>"
-            f'<text x="{cx + 8:.1f}" y="{cy + 4:.1f}" font-size="10" fill="#c8d3e0">{r["iteration"]}</text>'
-        )
+        color = "#5b9dff" if on_front else "#5c6b7e"
+        if warmup:
+            shape = (
+                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3.5" fill="none" '
+                f'stroke="{color}" stroke-width="1.5" opacity="0.75">'
+            )
+        else:
+            shape = f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{color}" opacity="0.95">'
+        marks.append(f"{shape}<title>{html.escape(tooltip)}</title></circle>")
+        if not warmup or r["iteration"] == last_iteration:
+            marks.append(
+                f'<text x="{cx + 8:.1f}" y="{cy + 4:.1f}" font-size="10" fill="#c8d3e0">{r["iteration"]}</text>'
+            )
 
     return (
-        f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" '
-        f'aria-label="energy vs accuracy per iteration; blue marks the current Pareto rank 1 candidates">'
-        f'<polyline points="{path}" fill="none" stroke="#33475c" stroke-width="1"/>'
+        f'<svg viewBox="0 0 {width} {height}" width="100%" height="auto" '
+        f'style="max-width:{width}px" role="img" '
+        f'aria-label="energy vs accuracy per iteration; filled marks are surrogate-guided search '
+        f'candidates joined in order, hollow marks are unordered LHS warm-up samples, '
+        f'blue marks the current Pareto rank 1 candidates">'
+        + axis
+        + trajectory
         + "".join(marks)
         + f'<text x="{width / 2:.1f}" y="{height - 8}" font-size="11" fill="#93a4b8" '
         f'text-anchor="middle">energy_pj &#8594; (lower=better)</text>'
@@ -202,6 +258,12 @@ def _pareto_legend_html() -> str:
         f'{_bi("Pareto rank 1 (on current front)", "파레토 랭크 1 (현재 프론트)")}</span>'
         '<span class="legend-item"><span class="legend-swatch" style="background:#5c6b7e"></span>'
         f'{_bi("Not on current front (dominated)", "현재 프론트에 속하지 않음 (열세 후보)")}</span>'
+        '<span class="legend-item"><span class="legend-swatch" '
+        'style="background:transparent;border:1.5px solid #5c6b7e"></span>'
+        f'{_bi("Hollow: LHS warm-up (unordered samples)", "빈 원: LHS 워밍업 (순서 없는 샘플)")}</span>'
+        '<span class="legend-item"><span class="legend-swatch" '
+        'style="background:#4a6b8a;border-radius:0;height:2px"></span>'
+        f'{_bi("Line: surrogate-guided search order", "선: 서로게이트 탐색 순서")}</span>'
         "</div>"
     )
 
