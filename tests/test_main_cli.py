@@ -1342,3 +1342,77 @@ def test_ignore_learned_state_flag_defaults_off_and_parses(monkeypatch):
 
     monkeypatch.setattr(sys, "argv", ["main.py", "--model-id", "resnet18", "--ignore-learned-state"])
     assert main.parse_args().ignore_learned_state is True
+
+
+def test_seeded_pareto_history_continues_iteration_numbering_instead_of_colliding(
+    monkeypatch, tmp_path, registered_hw_config
+):
+    """Regression: the parallel warm-up branch seeds `iteration_count` from
+    its own candidate count, but the cross-session seeding branch left it at
+    0 -- so @planner's first call re-issued iteration 1, a number a loaded
+    candidate already claimed. tools/dashboard.py's `_iteration_rows` joins
+    candidate_history against planner_decisions *by* iteration, so this run's
+    rationale got attached to the previous run's candidate too.
+    """
+    lts_path = tmp_path / "long_term_store.sqlite"
+    monkeypatch.setattr(main, "DEFAULT_LONG_TERM_STORE_DB", lts_path)
+    model_store, _ = _long_term_stores(tmp_path)
+    stored = [
+        {
+            "iteration": i,
+            "accuracy": 0.8,
+            "energy_pj": 100.0,
+            "noc_latency_ms": 1.0,
+            "avg_weight_bits": 6,
+            "avg_column_pruning_ratio": 0.1,
+            "layer_configs": [],
+            "is_converged": True,
+            "pareto_rank": 1,
+        }
+        for i in (1, 2, 3)
+    ]
+    model_store.put_pareto_solutions(
+        main._pareto_store_key("resnet18", registered_hw_config.hw_spec_id), {"candidates": stored}
+    )
+
+    from graph import build_graph
+
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    config = {"configurable": {"thread_id": "thread-learn-iteration"}}
+    with SqliteSaver.from_conn_string(db_path) as checkpointer:
+        run_session("resnet18", registered_hw_config, "thread-learn-iteration", checkpointer)
+        final_state = build_graph(checkpointer=checkpointer).get_state(config).values
+
+    iterations = [c["iteration"] for c in final_state["candidate_history"]]
+    assert len(iterations) == len(set(iterations)), f"duplicate iteration numbers: {iterations}"
+    # The seeded candidates keep 1-3; this run's first real candidate is 4.
+    assert max(c["iteration"] for c in stored) == 3
+    assert min(i for i in iterations if i not in {1, 2, 3}) == 4
+
+
+def test_warns_when_the_learned_calibration_factor_disagrees_with_the_literature_one(capsys):
+    """The two calibration sources answer the same question from different
+    evidence; a large gap silently rescales every energy_pj in the run
+    depending only on which one was available. Reporting only -- neither
+    factor changes."""
+    main._warn_on_calibration_disagreement(166.93, 51.85)
+
+    out = capsys.readouterr().out
+    assert "3.2배 차이" in out
+    assert "--ignore-learned-state" in out
+
+
+def test_does_not_warn_when_the_two_calibration_factors_broadly_agree(capsys):
+    """These are order-of-magnitude corrections -- ordinary disagreement is
+    expected, and warning on it would train a researcher to ignore the line."""
+    main._warn_on_calibration_disagreement(100.0, 150.0)
+
+    assert capsys.readouterr().out == ""
+
+
+def test_does_not_warn_when_there_is_no_literature_factor_to_compare_against(capsys):
+    """--exact-calibration-only on an unmatched hw_config leaves no bootstrap
+    factor at all; there is no disagreement to report, only a learned value."""
+    main._warn_on_calibration_disagreement(None, 51.85)
+
+    assert capsys.readouterr().out == ""
