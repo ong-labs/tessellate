@@ -1,10 +1,12 @@
 # AutoCIM-Agent
 
-**CIM(Compute-In-Memory) 반도체를 위한 LangGraph 기반 7-에이전트 HW-SW 공동설계 최적화 프레임워크**
+**CIM(Compute-In-Memory) 반도체를 위한 LangGraph 기반 7-에이전트 HW-SW 공동설계 연구 플랫폼 — 사람의 검토를 전제로 후보를 생성·검증하는 도구**
 
-레이어별 양자화 비트/컬럼 프루닝 비율과 크로스바 하드웨어 제약(ADC/DAC 해상도, IR-drop, 소자 노이즈)을 함께 고려해, 정확도·에너지·지연시간의 Pareto 최적점을 자율적으로 탐색하는 폐루프(closed-loop) 에이전트 파이프라인입니다. 배경과 전체 설계 의도는 [`docs/research_plan.md`](docs/research_plan.md)를, 코드 작성 규칙은 [`docs/coding_guidelines.md`](docs/coding_guidelines.md)를 참고하세요.
+레이어별 양자화 비트/컬럼 프루닝 비율과 크로스바 하드웨어 제약(ADC/DAC 해상도, IR-drop, 소자 노이즈)을 함께 고려해, 정확도·에너지·지연시간의 Pareto 후보를 탐색하고 실제 QAT/물리 시뮬레이션/2단계 정밀 재검증으로 매 후보를 검증하는 폐루프(closed-loop) 파이프라인입니다. **"탐색이 사람이나 더 단순한 방법보다 낫다"는 주장을 하는 프로젝트가 아닙니다** — 그 대신 (1) mock 자리 표시자를 실제 물리 모델로 하나씩 교체해온 과정, (2) 매 교체마다 실제 실행으로 재검증하며 발견한 진짜 버그들, (3) 이 시스템이 실제로 잘하는 것과 못하는 것을 실측으로 정직하게 특성화한 결과를 남기는 것을 목표로 합니다 (아래 "실측으로 확인한 것" 참고). 처음 접하는 개념(CIM/크로스바/ADC·DAC/양자화/파레토 탐색)은 [`docs/concepts.md`](docs/concepts.md)를, 배경과 전체 설계 의도는 [`docs/research_plan.md`](docs/research_plan.md)를, 코드 작성 규칙은 [`docs/coding_guidelines.md`](docs/coding_guidelines.md)를 참고하세요.
 
 ## 아키텍처
+
+이 파이프라인의 "완료"(`__end__`) 상태는 최종 확정이 아니라 **사람이 검토할 후보가 준비됐다는 뜻**입니다. `hitl_human_approval`도 예외 처리 경로가 아니라, 이 시스템의 신뢰성 한계(아래 실측 결과 참고) 때문에 실제로 자주 타는, 설계상 핵심적인 경로입니다.
 
 ```mermaid
 graph TD
@@ -20,15 +22,18 @@ graph TD
     verifier --> evaluator["@evaluator (수렴 판정/Pareto rank)"]
 
     evaluator -- "Re-plan with History" --> planner
-    evaluator -- "HITL Interrupt" --> hitl["hitl_human_approval"]
+    evaluator -- "HITL Interrupt" --> hitl["hitl_human_approval<br/>(사람 개입 지점 -- 예외가 아니라 핵심 경로)"]
     evaluator -- "Converged (Done)" --> precision["@precision_verifier (정밀 재검증)"]
 
     precision -- "Re-plan with History" --> planner
     precision -- "HITL Interrupt" --> hitl
-    precision -- "Converged (Done)" --> END[__end__]
+    precision -- "Converged (Done)" --> END["__end__<br/>(연구자 검토 대상 후보 -- 최종 확정 아님)"]
 
-    hitl --> planner
+    hitl -- "Re-plan" --> planner
+    hitl -- "Concluded (low confidence)" --> END
 ```
+
+> `hitl_human_approval`에서 나가는 두 경로는 `graph.py`의 `hitl_router`가 고릅니다: 연구자가 새 탐색 범위를 승인하면 `@planner`로 돌아가고, 더 진행하지 않고 **지금까지의 최선 후보로 종결**하기로 하면(수동 [3]번 선택, 또는 `--auto-hitl`이 라운드 상한에 도달) `low_confidence_conclusion` 표시와 함께 바로 `__end__`로 갑니다 — 이 경우 `@precision_verifier`를 건너뜁니다(애초에 목표를 만족한 적 없는 후보라 정밀 재검증이 확인할 게 없기 때문). 이 표시가 붙은 결과는 `is_converged`를 `True`로 보고하지 않으며, CLI 최종 출력과 대시보드 모두 "검토 필요"로 구분해 보여줍니다.
 
 | 에이전트 | 역할 | 실제 구현 여부 |
 |---|---|---|
@@ -37,11 +42,22 @@ graph TD
 | `@mapper` / `@profiler` | NoC 홉카운트/대역폭 매핑, ADC/DAC/크로스바 에너지·지연 물리 시뮬레이션 | 실제 (fast-approximation) |
 | `@verifier` | IR-drop/노이즈 마진 기반 수렴 판정 | 실제 |
 | `@evaluator` | Pydantic 스키마 검증, NSGA-II 스타일 Pareto rank, 재탐색/HITL 라우팅 | 실제 |
-| `@precision_verifier` | `@evaluator`가 수렴으로 판단한 후보만 골라 2단계 정밀 재검증하고, 그 결과로 `calibration_factors`를 갱신 (`tools/precision_check.py`) | Mock First (실제 정밀 시뮬레이터 자리 표시자, 인터페이스/그래프 라우팅은 실제) |
+| `@precision_verifier` | `@evaluator`가 수렴으로 판단한 후보만 골라 2단계 정밀 재검증하고, 그 결과로 `calibration_factors`를 갱신 (`tools/precision_check.py`) | 부분 실제 (ADC 에너지: `hwcomponents_adc` 문헌 기반 모델(항상) / DAC·크로스바-MAC 에너지: `hwcomponents_neurosim`(Docker 한정) / SRAM 버퍼 에너지: `hwcomponents_cacti`(Docker 한정) — 로컬(비-Docker) 환경에서는 네 항 모두 fast-approximation 자리 표시자로 폴백) |
 
-> **스코프 한계 (의도적으로 문서화됨):** `@mapper`/`@profiler`는 NeuroSim/CIM-Loop 같은 정밀 시뮬레이터가 아니라 물리 법칙 기반의 fast-approximation이며(`calibration_factors`로 보정), `@tuner`의 학습 데이터는 CIFAR10 512/128/1000장 서브셋입니다. `@precision_verifier`도 같은 이유로 현재는 Mock First 자리 표시자입니다(실제 정밀 시뮬레이터 바인딩 전). 후보 간 **상대 비교**에는 신뢰할 수 있지만, 절대 수치를 그대로 벤치마크/제품 스펙으로 사용하지 마세요.
+> **스코프 한계 (의도적으로 문서화됨):** `@mapper`/`@profiler`는 NeuroSim/CIM-Loop 같은 정밀 시뮬레이터가 아니라 물리 법칙 기반의 fast-approximation이며(`calibration_factors`로 보정), `@tuner`의 학습 데이터는 CIFAR10 512/128/1000장 서브셋입니다. `@precision_verifier`의 ADC 에너지 항은 실제 시뮬레이터(`hwcomponents_adc`, [arXiv:2404.06553](https://arxiv.org/abs/2404.06553) 기반 문헌-fit 모델)로 항상 교체되고, DAC·크로스바-MAC 에너지는 `hwcomponents_neurosim`(실제 NeuroSim C++ 코어)이 설치된 환경(Docker 이미지)에서만 실제 모델로 교체됩니다 -- 이 패키지는 설치 시점에 NeuroSim의 실제 C++ 소스를 `g++`로 컴파일해야 해서 C++ 툴체인 없는 로컬 환경(이 프로젝트의 Windows 개발 환경 포함)에서는 설치 자체가 안 되고, `requirements-docker.txt`를 통해 Docker 이미지에서만 설치됩니다. 이때도 `HWConfig.device_type`(RRAM/SRAM/PCM/STTRAM)을 명시하지 않으면 NeuroSim의 제네릭 placeholder 셀 위에서 계산되므로, 여전히 특정 실제 칩을 인용하는 수치는 아닙니다 -- `device_type`을 설정해야 실제 소자별 `.cell` 특성이 반영됩니다. `HWConfig.sram_buffer_kb`가 설정된 경우의 SRAM 버퍼 스테이징 에너지도 같은 Docker 이미지에서 `hwcomponents-cacti`(실제 CACTI SRAM 모델)로 교체됩니다 -- 단, 이 버퍼 에너지 항은 `tools/calibration.py`의 보정 계수 계산에서는 의도적으로 제외됩니다: `KNOWN_REFERENCES`의 모든 문헌 수치는 크로스바 매크로 자체의 pJ/MAC만 측정한 것이라 호스트 SRAM 버퍼 에너지를 포함하지 않기 때문입니다 (`tools/cim_physics.py`의 `compute_energy_pj`/`buffer_energy_pj` 분리, `tools/calibration.py`의 `compute_calibration_factor` 참고). CiMLoop 자체는 더 이상 유지보수되지 않고 Docker로만 배포됩니다 (자세한 내용은 `tools/precision_check.py`의 모듈 docstring 참고). 후보 간 **상대 비교**에는 신뢰할 수 있지만, 절대 수치를 그대로 벤치마크/제품 스펙으로 사용하지 마세요.
 >
-> **NSGA-II 서로게이트의 데이터 규모 한계:** `@planner`의 NSGA-II(`pop_size=200`, `n_generations=30`)는 실제 후보가 아니라 IDW 대리모델(surrogate) 예측값 위에서 돌아갑니다. 이 대리모델은 세션당 최대 12개(`_MAX_WARMUP_CANDIDATES`)의 실측 워밍업 후보로 학습되는데, 탐색 공간 자체는 `2 × stage 수`차원(mobilenet_v2 기준 20 stage → 40차원)이라, 세대를 거듭할수록 진짜로 정교해지는 다중목적 탐색이라기보다 소수의 실측 데이터 주변을 폭넓게 보간하는 수준입니다. "진짜 NSGA-II"라는 표현이 구현의 사실(실제 pymoo 알고리즘을 씀)을 가리키는 것이지, 이 정도 데이터로 뒷받침되는 통계적 신뢰도를 의미하는 건 아닙니다.
+> **NSGA-II 서로게이트의 데이터 규모 한계:** `@planner`의 NSGA-II(`pop_size=200`, `n_generations=30`)는 실제 후보가 아니라 IDW 대리모델(surrogate) 예측값 위에서 돌아갑니다. 이 대리모델은 세션당 최대 `_MAX_WARMUP_CANDIDATES`(=20)개, stage당 `_WARMUP_SAMPLES_PER_STAGE`(=1.5)개의 실측 워밍업 후보로 학습되는데(resnet18: 10 stage → 15개), 탐색 공간 자체는 `2 × stage 수`차원(mobilenet_v2 기준 20 stage → 40차원)이라, 세대를 거듭할수록 진짜로 정교해지는 다중목적 탐색이라기보다 소수의 실측 데이터 주변을 폭넓게 보간하는 수준입니다. "진짜 NSGA-II"라는 표현이 구현의 사실(실제 pymoo 알고리즘을 씀)을 가리키는 것이지, 이 정도 데이터로 뒷받침되는 통계적 신뢰도를 의미하는 건 아닙니다.
+
+## 실측으로 확인한 것 — 이 시스템이 잘하는 것과 아직 못하는 것
+
+이 섹션은 "탐색이 낫다"를 주장하려는 게 아니라, `tools/baseline_compare.py`로 실제 QAT 학습·실제 물리 시뮬레이션을 돌려 얻은 **있는 그대로의 결과**를 보고합니다 (재현: `python -m tools.baseline_compare --model-id resnet18 --hw-config examples/hw_configs/default_cim_v1_128x128.json --seeds 3 --grid`).
+
+- **제약 없는 다중목적 탐색은 정확도를 크게 희생할 수 있습니다.** `--target-accuracy`를 안 주고 돌리면, 탐색이 찾은 후보(정확도 0.243)가 "탐색을 아예 안 한" 균일 설정(weight_bits=8, pruning 없음, 정확도 0.745)보다 에너지는 약 11% 낮지만 정확도는 크게 낮았습니다 — 둘 다 각자의 목적함수 기준으로는 유효한 Pareto 지점이지만, 정확도 하한을 명시하지 않으면 탐색이 그 방향으로 갈 수 있다는 뜻입니다.
+- **정확도 목표를 걸어도 탐색이 항상 성공하진 않습니다.** `--target-accuracy 0.7`로 재실행했을 때 3개 시드 중 1개만 수렴했습니다. 원인을 QAT 예산(에폭 수)과 서로게이트 워밍업 후보 수로 나눠 실측 진단한 결과, 둘 다 부분적으로만 도움이 됐습니다(각각 실패했던 시드 하나씩만 구제) — 코드에 이미 반영된 개선(`AUTOCIM_QAT_MAX_EPOCHS` env var, 워밍업 공식 개선)에도 불구하고 완전한 신뢰성은 아직 없습니다.
+- **이 미수렴이 탐색/대리모델의 결함이 아니라 정확도 천장 효과일 수 있습니다.** 위 진단을 더 파고들어 `target_accuracy`만 바꿔가며 재실행한 결과(resnet18, `default_cim_v1_128x128.json`, 기본 QAT 예산, 시드 0~2): `0.65` → 3/3 수렴(정확도 0.670/0.693/0.702), `0.70`/`0.75` → 둘 다 0/3 수렴하며 최고 성능도 각각 0.699/0.683에 그쳤습니다 — 탐색 iteration을 auto-hitl 상한(2라운드, 약 24회)까지 다 써도 0.71을 못 넘었습니다. 즉 이 하드웨어/QAT 예산 조합에서 도달 가능한 정확도 천장이 대략 0.67~0.71 근방에 있고, `target_accuracy=0.7`이 그 천장 바로 위에 걸려있어 통과/실패가 QAT 학습 자체의 노이즈에 좌우되는 상태에 가깝습니다 — 대리모델을 더 정교하게(예: Gaussian Process 기반) 바꾼다고 해서 이 특정 실패가 해결되진 않을 것으로 보입니다. 도달 가능한 정확도 자체를 올리려면 QAT 학습 데이터 크기(`AUTOCIM_QAT_TRAIN_SIZE`, 기본 512장) 확대가 다음으로 시도해볼 유력한 레버입니다 — 아래서 검증했습니다.
+- **QAT 학습 데이터를 8배(512→4096장)로 늘렸더니 정확도 천장 가설이 확인됐습니다.** 같은 조건(resnet18, `default_cim_v1_128x128.json`, `target_accuracy=0.7`, 시드 0~2)에서 `tools/baseline_compare.py --seeds 3 --grid`를 재실행한 결과, 탐색(search)이 **0/3 → 3/3 수렴**으로 바뀌었습니다(정확도 0.84/0.86/0.85). 즉 앞서 발견한 미수렴은 탐색/대리모델의 결함이 아니라 정말로 QAT 학습 예산 부족이 원인이었다는 게 실측으로 확인됐습니다. 다만 이 스케일에서도 탐색은 여전히 균일 설정 베이스라인(정확도 0.904, weight_bits=8/pruning 없음)보다 낮은 정확도(평균 0.85)로 수렴하는데, 대신 에너지가 약 10% 더 낮습니다(29.5k pJ vs 32.7k pJ) — 이건 버그가 아니라 다중목적 탐색이 정확도-에너지 트레이드오프를 의도대로 반영하고 있다는 뜻입니다(위 "제약 없는 다중목적 탐색은 정확도를 크게 희생할 수 있습니다" 항목과 같은 패턴). 그리드 탐색의 최고점(weight_bits=6, pruning 없음, 정확도 0.91, 에너지 31.3k pJ)이 베이스라인보다 정확도·에너지 둘 다 앞선 것도 확인됐는데, per-stage 탐색이 이 지점을 못 찾은 이유(균일 설정보다 세밀한 탐색 공간을 아직 다 못 훑는 것인지, 다중목적 트레이드오프상 의도적으로 다른 지점을 택한 것인지)는 아직 더 안 파봤습니다.
+- **그래서 HITL이 예외가 아니라 핵심 경로입니다.** 위 두 결과가 정확히 이 아키텍처(위 다이어그램에서 강조 표시한 `hitl_human_approval`/`__end__`)가 "최종 자동 확정"이 아니라 "사람이 검토할 후보 생성"으로 설계된 이유입니다.
+- 이 진단 과정에서 `tools/repeat_search.py`의 실제 버그(워밍업 후보를 최선 시도로 착각하는 버그)도 발견해 수정했습니다 — 실측으로 실제 실행해보지 않았다면 유닛 테스트만으로는 못 잡았을 종류의 문제였습니다.
 
 ## 설계 근거 (CIM 가속기 연구 동향과의 연결)
 
@@ -52,13 +68,13 @@ graph TD
 - **ADC/DAC 물리 한계가 탐색 알고리즘을 실제로 제약**: `nodes/planner.py`의 `search_bounds()`는 `weight_bits`의 탐색 상한을 `min(adc_bits, dac_bits)`로 강제합니다 — "정책상 원하는 비트 수"가 아니라 "이 하드웨어가 물리적으로 표현 가능한 비트 수"가 탐색 공간 자체를 정의합니다.
 - **근사 물리 모델의 신뢰도를 스스로 검증**: `tools/calibration.py`는 분석적 에너지 추정치를 실제 문헌값(NeuroSim 벤치마크, RRAM/SRAM/MRAM/DARAM/FeFET 등 여러 소자별 실측 칩 논문 8건, 다양한 array 크기·ADC 해상도·공정 조합)과 대조해 보정 계수를 매깁니다. 기본값은 정확히 일치하는 참조가 없어도 가장 가까운 참조의 보정 계수를 근사 적용하는 것이고(`--exact-calibration-only`로 예전처럼 엄격한 미보정 상태로 되돌릴 수 있음), 어느 쪽이든 정확한 인용인지 근사 추정인지는 `tools/dashboard.py`의 캘리브레이션 배지에 항상 정직하게 표시됩니다.
 - **IR-drop/소자 노이즈를 수렴 조건에 직접 반영**: `@verifier`는 정확도가 좋아도 배선 저항/소자 노이즈로 인한 물리적 실패(`ir_drop_error_pct`, `noise_margin_db`)가 있으면 수렴으로 인정하지 않습니다 — 소프트웨어 지표만으로 "완성"을 선언하지 않는다는 원칙입니다.
-- **2단계 다중 충실도(Multi-fidelity) 검증**: 정밀 시뮬레이터(NeuroSim/CIM-Loop 등)는 회로 연산이 포함돼 있어 탐색 중인 모든 후보를 검증하기엔 비용이 큽니다. 이 프로젝트는 `@evaluator`의 fast-approximation이 수렴으로 판단한 (탐색 전체가 아니라 극히 일부인) 후보만 골라 `@precision_verifier`에서 다시 검증하고, 그 결과로 `calibration_factors`를 자동 갱신해 이후 후보들의 근사 정확도까지 함께 개선하는 폐루프를 구성했습니다. 실제 세션에서 확인한 예: 11번째 반복에서 근사 모델이 `energy_pj=69.72416`으로 수렴 판정했고, 2단계 재검증이 `73.210368`(보정 계수 `1.05x`)을 산출해 최종 수렴 및 `calibration_factors`/`calibration_provenance` 갱신까지 그래프 라우팅 그대로 이어짐을 확인했습니다. 현재 `@precision_verifier`의 계산 자체는 Mock First(`docs/coding_guidelines.md` 5.D) 자리 표시자이고, 검증된 것은 그래프 라우팅·state 갱신·캘리브레이션 피드백 루프 구조입니다 (실제 정밀 시뮬레이터 바인딩은 로드맵 참고).
+- **2단계 다중 충실도(Multi-fidelity) 검증**: 정밀 시뮬레이터(NeuroSim/CIM-Loop 등)는 회로 연산이 포함돼 있어 탐색 중인 모든 후보를 검증하기엔 비용이 큽니다. 이 프로젝트는 `@evaluator`의 fast-approximation이 수렴으로 판단한 (탐색 전체가 아니라 극히 일부인) 후보만 골라 `@precision_verifier`에서 다시 검증하고, 그 결과로 `calibration_factors`를 자동 갱신해 이후 후보들의 근사 정확도까지 함께 개선하는 폐루프를 구성했습니다. 실제 세션에서 확인한 예(당시 계산이 전부 Mock이던 시점의 기록): 11번째 반복에서 근사 모델이 `energy_pj=69.72416`으로 수렴 판정했고, 2단계 재검증이 `73.210368`(보정 계수 `1.05x`)을 산출해 최종 수렴 및 `calibration_factors`/`calibration_provenance` 갱신까지 그래프 라우팅 그대로 이어짐을 확인했습니다. 현재는 이 재검증의 ADC 에너지 항이 `hwcomponents_adc`(문헌 기반 실제 모델)로 교체되어, 위 예시의 `1.05x`보다 훨씬 큰 보정 계수가 나올 수 있고, Docker 이미지에서는 DAC·크로스바-MAC 에너지도 `hwcomponents_neurosim`(실제 NeuroSim 모델)으로, SRAM 버퍼 에너지도 `hwcomponents_cacti`(실제 CACTI 모델)로 함께 교체됩니다 — 로컬(비-Docker) 환경에서는 이 세 항이 여전히 fast-approximation 자리 표시자입니다.
 
 ## 주요 기능
 - **로컬 우선 LLM**: `@planner`는 기본적으로 로컬 Ollama 모델(`ollama:qwen2.5:7b`)을 사용 -- 하드웨어 스펙이 외부로 나가지 않음. `AUTOCIM_PLANNER_MODEL`로 클라우드 provider를 opt-in 가능
 - **세션 영속성**: `SqliteSaver` 기반 체크포인트로 프로세스 재시작 후에도 `--thread-id`로 재개
 - **HITL(Human-in-the-Loop)**: 수렴 정체 시 연구원 개입 요청 (dynamic `interrupt()`)
-- **LLM 호출 운영**: 재시도/지수 백오프, rate-limit 대응, 토큰/비용 추적, 누적 비용·토큰 상한(kill-switch)
+- **LLM 호출 운영**: 재시도/지수 백오프, rate-limit 대응, 토큰/비용 추적, 누적 비용·토큰 상한(kill-switch), 설정된 provider가 재시도를 모두 소진해도 계속 실패하면 로컬 기본 모델로 자동 전환(cross-provider fallback) -- 그마저 실패해도 탐색 자체(`stage_configs`)는 LLM 성공 여부와 무관하게 항상 진행되므로, 이 전환은 파이프라인이 멈추는 걸 막는 게 아니라 rationale이 LLM 설명 없는 템플릿으로 대체되는 빈도를 줄이는 역할입니다
 - **구조화된 관측성**: iteration별 JSON Lines 로그(`observability.py`) + 후보/Pareto front 이동을 보여주는 HTML 대시보드(`tools/dashboard.py`)
 - **GPU 자동 감지**: `tools/qat.py`가 CUDA → Apple MPS → CPU 순으로 자동 감지 (`AUTOCIM_QAT_DEVICE`로 override 가능)
 - **병렬 워밍업**: LHS 워밍업 후보들은 서로 독립적이므로, 새 세션 시작 시 순차 그래프 루프 진입 전에 스레드 풀에서 한번에 동시 평가 (`tools/batch_warmup.py`) -- HITL 개입 없이 워밍업 전체가 자동으로 끝남. 스레드 수는 `--parallel-warmup-workers`로 조절 가능
@@ -189,6 +205,8 @@ docker run --rm \
 
 > **로컬 Ollama 기본값과 Docker**: 컨테이너 안에서는 `ollama:qwen2.5:7b` 기본값이 가리키는 `localhost:11434`가 컨테이너 자신을 가리켜 호스트의 Ollama에 닿지 않습니다. `-e OLLAMA_HOST=http://host.docker.internal:11434`로 호스트의 Ollama를 가리키거나, `.env.local`에서 `AUTOCIM_PLANNER_MODEL`을 클라우드 provider로 오버라이드하세요.
 
+> **Docker 이미지에서만 활성화되는 실제 시뮬레이터**: `requirements-docker.txt`가 `requirements.txt` 위에 `hwcomponents-neurosim`과 `hwcomponents-cacti`를 추가로 설치합니다 -- 전자는 `pip install` 시점에 NeuroSim의 실제 C++ 소스를 `make`/`g++`로 컴파일하므로(이미지에 `build-essential` 설치 단계 포함, 첫 빌드가 그만큼 오래 걸림) C++ 툴체인이 없는 로컬 환경에서는 애초에 설치할 수 없고, 후자는 컴파일은 필요 없지만 POSIX 전용 `fcntl`을 import해서 Windows에서 로드 자체가 안 됩니다. 설치되면 `@precision_verifier`(`tools/precision_check.py`)의 DAC/크로스바-MAC 에너지 항이 NeuroSim의 실제 device 모델(`RowDrivers`/`MemoryCell`)로, SRAM 버퍼 스테이징 에너지(`HWConfig.sram_buffer_kb` 설정 시)가 CACTI의 실제 `SRAM` 모델로 자동 전환됩니다 -- 코드 변경 없이, Docker로 실행한다는 사실 자체가 이 전환을 켭니다. `--hw-config`에 `device_type`(`rram`/`sram`/`pcm`/`sttram`)을 명시하면 NeuroSim의 제네릭 placeholder 셀 대신 해당 소자의 실제 NVMExplorer-fit `.cell` 설정을 사용합니다 (`examples/hw_configs/`의 `calibrated_*.json`들이 이미 이렇게 설정돼 있음); 생략하면 여전히 placeholder 셀로 폴백합니다.
+
 ## 테스트
 
 ```bash
@@ -238,6 +256,7 @@ schemas/                      # Pydantic 입출력 스키마
 tests/                        # pytest 스위트 (전부 stub 기반)
 docs/                         # 연구 계획서 등 부가 문서
 examples/hw_configs/          # --hw-config 예시 JSON
+examples/custom_model_dataset/ # --model-id/--dataset-id 커스텀 스펙 예시 (코드 변경 없이 자체 모델/데이터셋 연결)
 ```
 
 ## 향후 계획 (Roadmap)
@@ -246,11 +265,22 @@ examples/hw_configs/          # --hw-config 예시 JSON
 - 다중목적(accuracy/energy/latency) 진짜 NSGA-II 탐색 (`pymoo`) — 정확도 단일목적이었던 초기 서로게이트의 한계를 실측으로 확인하고 교체
 - LLM 역할 축소 — 최종 weight_bits/pruning 수치는 탐색 알고리즘이 결정하고, LLM은 rationale 설명과 이상 징후(anomaly) 플래깅만 담당 (로컬 소형 모델이 수치 방향을 반대로 추론하는 걸 실측으로 발견한 뒤 반영)
 - Column-wise quantization — 크로스바 컬럼(출력 채널)별 독립 양자화 스케일 + partial-sum(ADC 직전 출력) 양자화
-- 2단계 다중 충실도 검증 구조 — `@evaluator` 이후 `@precision_verifier` 노드/그래프 라우팅, 그 결과로 `calibration_factors`/`calibration_provenance`를 자동 갱신하는 폐루프까지 실제 세션으로 검증 (정밀 계산 자체는 아직 Mock First 자리 표시자)
+- 2단계 다중 충실도 검증 구조 — `@evaluator` 이후 `@precision_verifier` 노드/그래프 라우팅, 그 결과로 `calibration_factors`/`calibration_provenance`를 자동 갱신하는 폐루프까지 실제 세션으로 검증
+- **ADC 에너지 실제 시뮬레이터 연동** — `tools/precision_check.py`의 ADC 에너지 항을 `hwcomponents_adc`(문헌 기반 실제 모델, [arXiv:2404.06553](https://arxiv.org/abs/2404.06553))로 교체. 순수 Python이라 모든 환경에서 동작.
+- **DAC/크로스바-MAC 에너지 실제 시뮬레이터 연동 (Docker 전용)** — 같은 파일의 DAC/크로스바-MAC 에너지 항을 `hwcomponents-neurosim`(NeuroSim의 `RowDrivers`/`MemoryCell`, 실제 C++ 코어)으로 교체. 이 패키지는 설치 시 `make`/`g++`로 C++ 소스를 컴파일해야 해서 로컬(C++ 툴체인 없는 Windows 개발 환경)에서는 설치 자체가 불가능하다는 걸 확인했고, 대신 `requirements-docker.txt` + `Dockerfile`의 `build-essential`을 통해 Docker 이미지에서만 설치·활성화됩니다.
+- **SRAM 버퍼 에너지 모델링 (analytical + CACTI 실제 모델, Docker 전용)** — `HWConfig.sram_buffer_kb`가 그동안 NoC 지연시간(`buffer_delay_ms`)에만 반영되고 `energy_pj`에는 전혀 반영되지 않던 gap을 메움. `tools/cim_physics.py::simulate_cim_profile`이 `compute_energy_pj`(크로스바/ADC/DAC, 기존 로직)와 `buffer_energy_pj`(버퍼를 한 번 채우는 1회성 비용, `simulate_noc_mapping`의 `buffer_delay_ms`와 같은 granularity)를 분리 반환하도록 변경하고, Docker에서는 `buffer_energy_pj`를 `hwcomponents-cacti`의 `SRAM.write()` 실제 모델로 교체(`_real_sram_buffer_energy_fj`). 이 작업 중 발견한 아키텍처 충돌: `tools/calibration.py`의 `KNOWN_REFERENCES` 문헌 수치는 전부 크로스바 매크로 자체의 pJ/MAC만 측정한 것이라 버퍼 에너지를 포함하지 않는데, 만약 새 버퍼 항을 그냥 `energy_pj`에 합산하면 `compute_calibration_factor`의 MAC당 비율 계산이 (레이어 수와 무관한 고정 비용인) 버퍼 에너지 때문에 왜곡됨 — 특히 어레이가 작을수록 왜곡이 커짐. 그래서 `compute_calibration_factor`/`profiler_tool`의 보정 계수 적용을 `compute_energy_pj`에만 한정하고, 버퍼 에너지는 보정 없이 최종 `energy_pj`에 더해지도록 분리.
+- **실제 소자 타입(device_type) 연동** — `HWConfig.device_type`(`CIMDeviceType`: RRAM/SRAM/PCM/STTRAM) 필드를 추가하고 `tools/precision_check.py`가 이를 NeuroSim의 실제 NVMExplorer-fit `.cell` 설정으로 매핑하도록 연동. 이전까지는 Docker에서 NeuroSim이 활성화돼도 소자 타입을 특정하지 않는 제네릭 placeholder 셀 위에서 계산됐던 것을, `examples/hw_configs/`의 각 `calibrated_*.json`이 이미 명시하고 있던(README 표의 "Tech" 컬럼) 실제 소자 타입과 실제로 연결. 연동 도중 `hwcomponents_neurosim`의 내부 캐시가 `cell_config`를 캐시 키에서 빠뜨려서(같은 array 크기/타이밍이면 다른 소자 타입이어도 이전 결과를 그대로 재사용) device_type이 사실상 무시되는 버그를 발견해 캐시를 매 호출 전 비우도록 수정.
+- **`tools/calibration.py` 참조 매칭에 device_type 반영** — `find_matching_reference()`가 `(crossbar_rows, crossbar_cols, adc_bits)`만으로 매칭해서 같은 키를 공유하는 문헌이 있으면 disambiguate를 못 하던 문서화된 gap을 device_type으로 해소. 이 작업 중, 예전에 FeFET 레퍼런스 추가 시 같은 키((64,64,4비트 ADC))를 두고 제거됐던 Dong/Sinangil SRAM 레퍼런스를 device_type으로 구분 가능해진 김에 복원 — 그 결과 `examples/hw_configs/calibrated_dong_2020_sram_64x64.json`이 (KNOWN_REFERENCES에 Dong 항목이 없어) 실제로는 FeFET 수치로 조용히 보정되고 있던 기존 버그도 함께 발견해 수정. FeFET 자체는 `CIMDeviceType`에 대응 값이 없어(NeuroSim에 FeFET 셀 없음) 이제 device_type 미지정 상태로는 exact-match로 도달할 수 없게 됐고(2개 후보가 애매하게 걸림 → 우연히 맞히지 않고 미보정 처리), `--allow-approximate-calibration` 경로로는 여전히 접근 가능. 이 disambiguation은 main.py의 실제 기본 실행 경로(`allow_approximate_calibration=True`)가 쓰는 `find_nearest_reference()`에도 처음에는 반영이 안 돼 있었는데, 실제 e2e 실행으로 발견해서 같이 수정.
+- **`tools/repeat_search.py`에 신뢰구간 추가** — 기존 mean/stdev/min/max에 Student's t 95% 신뢰구간을 추가(`scipy.stats.t`, pymoo 경유로 이미 설치돼있던 의존성이라 새 패키지 불필요). N이 작을 때(핸드풀 수준의 replicate) 구간이 넓게 나오는 걸 숨기지 않고 오히려 "이 정도 N으로는 이만큼만 확신할 수 있다"는 정직한 신호로 보고.
+- **`tools/baseline_compare.py` 추가 — 미탐색 기준선 대비 비교** — `tools/run_ablation.py`가 이 프로젝트의 탐색 전략끼리만(multi_objective/single_objective/random) 비교하고 사람이 손으로 고른(또는 아예 최적화 안 한) 설계와는 비교한 적이 없던 gap을 메움. 모든 stage에 균일한 weight_bits/activation_bits(기본 8/8)·pruning 없음(0.0)을 고정한 "탐색 안 한" 기준선을 `tools/batch_warmup.py`의 warm-up 후보와 동일한 tuner→mapper→profiler→verifier 경로로 평가하고, 실제 탐색 결과와 동일한 시드 범위·`tools/repeat_search.py`의 신뢰구간 집계로 나란히 비교. `python -m tools.baseline_compare --model-id ... --hw-config ... --seeds N`으로 실행. `--grid`로 균일 (weight_bits, pruning_ratio) 그리드 스윕(단일 시드, 코스한 point estimate)도 추가 가능.
+- **탐색 신뢰성 진단 + 개선 (실측 기반)** — `--target-accuracy`를 건 `tools/baseline_compare.py` 실행에서 resnet18 탐색이 3번 중 1번만 수렴하는 걸 발견하고, 원인이 QAT 예산(5 epoch)인지 서로게이트 워밍업 후보 수(`_MAX_WARMUP_CANDIDATES=12`)인지 실측으로 분리 검증. (1) `AUTOCIM_QAT_MAX_EPOCHS` env var 추가(`tools/qat.py`의 `resolve_max_epochs()` — 기존 `nodes/tuner.py`/`tools/batch_warmup.py`에 중복돼 있던 `_DEFAULT_MAX_EPOCHS` 상수를 하나로 통합), 2배로 늘려 재테스트 — 실패했던 시드 중 하나를 구제. (2) `warmup_count()`가 실제로는 `n_stages`(resnet18=10)에서 이미 캡이 걸려서 `_MAX_WARMUP_CANDIDATES=12`를 늘려도 아무 효과가 없다는 걸 발견 — stage당 1개가 아니라 `_WARMUP_SAMPLES_PER_STAGE=1.5`개로 샘플링하도록 공식 자체를 바꾸고 캡도 20으로 올림(resnet18: 10→15개). 재테스트 결과 실패했던 다른 시드 하나가 auto-hitl 재시도 없이 바로 수렴 — 두 레버 모두 부분적으로 유효하지만 어느 쪽도 100% 신뢰성을 보장하지 않음(각 실험에서 나머지 시드 하나는 여전히 실패). 이 진단 과정에서 `tools/repeat_search.py::_best_candidate`의 실제 버그도 발견: warm-up 후보는 `target_accuracy` 게이팅 없이 물리적 수렴 여부만으로 자신의 `is_converged`를 설정하는데, `_best_candidate`가 이를 세션 전체의 수렴 여부와 혼동해서 탐색이 실패한 세션에서 항상 (진짜 최선이 아닌) 임의의 warm-up 후보를 반환하고 있었음 — `session_is_converged`를 명시적으로 받도록 시그니처를 바꿔 수정.
+- **QAT를 실배포 규모(4096 이미지)로 재검증** — `AUTOCIM_QAT_TRAIN_SIZE`/`AUTOCIM_QAT_MAX_EPOCHS`로 CIFAR10 서브셋 규모를 4096장까지 늘려 재실측. 이전에 관찰된 accuracy ceiling이 서치/서로게이트 버그가 아니라 QAT 학습 데이터 규모 자체의 한계였음을 확인 — 탐색은 3세드 모두 수렴(accuracy 0.84/0.86/0.85), 기준선 대비 에너지 ~10% 절감이라는 트레이드오프도 이 규모에서 재확인됨.
+- **자체 탐색 vs. Optuna 비교 (`tools/optuna_compare.py`)** — 동일한 실제 QAT+physics 파이프라인, 동일한 탐색 공간 구성(`points_to_stage_configs`와 동일한 activation_bits=weight_bits 규약), 동일한 정지 조건(첫 target 충족 후보)으로 이 프로젝트의 서로게이트 기반 NSGA-II 탐색을 잘 알려진 범용 최적화 라이브러리인 Optuna(NSGA-II 샘플러, 서로게이트 없이 실제 평가마다 직접 탐색)와 나란히 비교. 결과: 자체 탐색이 Optuna보다 명확히 우위 — 손으로 만든 acquisition 로직이 제 값을 하고 있음을 실측으로 확인.
+- **외부 published DSE 툴과의 비교 — 조사 후 진행하지 않기로 결정 (2026-08-14)**: `DNN_NeuroSim_V1.4`(neurosim/DNN_NeuroSim_V1.4, Shimeng Yu 그룹)를 실제로 조사한 결과, 애초 비교 전제("같은 물리 모델, 다른 탐색 알고리즘")가 성립하지 않는다는 걸 확인했습니다. 이 도구는 탐색/DSE 기능 자체가 없는 단일 설정 evaluator이고(`--cellBit`/`--ADCprecision`을 네트워크 전체에 균일 적용하는 CLI 플래그 방식, 이 프로젝트의 stage별 `LayerBitConfig` 같은 세분화가 없음), QAT 파이프라인도 별도(WAGE 방식)라 이쪽 탐색 알고리즘과 견줄 대상 자체가 없습니다. Docker 통합 자체는 기존 `hwcomponents-neurosim` 인프라를 재사용하면 되어 어렵지 않았을 텐데, 그게 실제 병목이 아니었습니다. 이 항목이 원래 답하려던 두 질문("우리 탐색이 잘 알려진 대안보다 나은가" / "물리 모델이 맞는가")은 각각 위 Optuna 비교와 기존 Docker 브릿지 물리 검증(ADC/DAC/크로스바-MAC/SRAM 버퍼 실측 연동)으로 이미 실질적으로 커버되고 있어, 더 진행하지 않기로 했습니다.
 
 **다음 단계로 고려 중:**
-- **실제 정밀 시뮬레이터 바인딩**: 그래프 라우팅/state 갱신/캘리브레이션 피드백 루프는 이미 완성돼 있으므로, 남은 작업은 `tools/precision_check.py`의 mock 계산을 NeuroSim 또는 그에 준하는 정밀 CIM 시뮬레이터에 대한 실제 호출로 교체하는 것입니다 — 특정 시뮬레이터 하나에 종속되지 않는 어댑터 형태를 목표로 합니다.
-- **평가 스케일 확장**: `tools/qat.py`는 현재 CIFAR10 서브셋(빠른 반복 실험용, 의도적 스코프 결정)으로 동작합니다. 실배포 규모 검증을 위해서는 ImageNet(또는 그 서브셋) 단위로 QAT 예산(에포크 수, 데이터 크기)을 확장하는 게 다음 목표입니다.
+- **ImageNet 스케일 검증**: 위 4096장 재검증으로 "학습 데이터를 늘리면 정확도 천장이 올라간다"는 것까지는 확인했지만, `tools/qat.py`는 여전히 CIFAR10 기반입니다(빠른 반복 실험용, 의도적 스코프 결정). 실배포 규모 주장을 하려면 ImageNet(또는 그 서브셋)으로 데이터셋 자체를 바꿔 재검증해야 합니다 — `--dataset-id`가 이미 커스텀 데이터셋 스펙을 받으므로 코드 변경 없이 연결은 가능하고, 남은 건 실제 실행/측정입니다.
+- **탐색 신뢰성 추가 개선**: 에폭↑/워밍업↑ 두 레버를 동시에 적용하거나, 여전히 실패하는 케이스를 고친 코드로 재실측하는 게 다음 후보입니다 — 지금은 두 레버 각각 "부분적으로 도움되지만 완전하지 않다"는 것까지만 확인된 상태입니다(위 4096장 재검증은 기본 QAT 예산이 아닌 별도 조건이라, 기본 예산에서의 신뢰성 문제는 그대로 남아 있습니다).
 
 ## 라이선스
 
