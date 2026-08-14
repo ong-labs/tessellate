@@ -5,14 +5,13 @@ START -> planner -> tuner -> (mapper, profiler fan-out) -> verifier -> evaluator
                             +----------------- Re-plan with History -------+
                             |                                              |
                        hitl_human_approval <--- HITL Interrupt ------------+
-                            |                                              |
-                            +----------------------> planner               |
-                                                                            +--> Converged (Done) -> precision_verifier
+                            |    (or: Concluded (low conf) -> END)         |
+                            +-> planner                                   +--> Converged (Done) -> precision_verifier
                                                                                                             |
                                                     +-------------- Re-plan with History -------------------+
                                                     |                                                       |
                                                hitl_human_approval <--- HITL Interrupt ---------------------+
-                                                    |                                                       |
+                                                    |    (or: Concluded (low conf) -> END)                  |
                                                     +-> planner                                             +--> Converged (Done) -> END
 
 @precision_verifier (mock Stage-2 high-fidelity re-check, docs/coding_guidelines.md 5.D Mock
@@ -26,10 +25,15 @@ ever reaches this node -- never every candidate a search tries.
 
 HITL pausing uses only the dynamic `interrupt()` call inside `hitl_node`
 (checklist item 1 / docs/coding_guidelines.md 5.B) -- `workflow.compile()` below must never
-be given `interrupt_before`/`interrupt_after`.
+be given `interrupt_before`/`interrupt_after`. `hitl_human_approval`'s own
+outgoing edge is conditional (`hitl_router`): a normal resume (new search
+bounds) still goes to `planner`, but `main.py`'s auto-hitl giving up after
+its round cap (`conclude_with_best`) routes straight to `END` instead,
+skipping `precision_verifier` (the candidate was never judged converged in
+the first place, so there's nothing for the precise re-check to confirm).
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
@@ -48,6 +52,15 @@ from nodes import (
     verifier_node,
 )
 from state import AutoCIMState
+
+
+def hitl_router(state: AutoCIMState) -> Literal["Concluded (low confidence)", "Re-plan"]:
+    """hitl_node's `conclude_with_best` resume (main.py's auto-hitl giving
+    up after its round cap) sets `low_confidence_conclusion` -- routes
+    straight to `END` instead of the normal `planner` retry, skipping
+    @precision_verifier the same way @evaluator_router already does for a
+    candidate that was never judged converged in the first place."""
+    return "Concluded (low confidence)" if state.get("low_confidence_conclusion") else "Re-plan"
 
 
 def build_graph(checkpointer: Optional[BaseCheckpointSaver] = None) -> CompiledStateGraph:
@@ -72,7 +85,14 @@ def build_graph(checkpointer: Optional[BaseCheckpointSaver] = None) -> CompiledS
     workflow.add_edge("profiler", "verifier")
 
     workflow.add_edge("verifier", "evaluator")
-    workflow.add_edge("hitl_human_approval", "planner")
+    workflow.add_conditional_edges(
+        "hitl_human_approval",
+        hitl_router,
+        {
+            "Concluded (low confidence)": END,
+            "Re-plan": "planner",
+        },
+    )
 
     workflow.add_conditional_edges(
         "evaluator",
