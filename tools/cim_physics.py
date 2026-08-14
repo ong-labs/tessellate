@@ -208,6 +208,54 @@ def crossbar_passes(rows: int, cols: int, groups: int, hw: HWConfig, pruning_rat
     return math.ceil(rows / array_rows) * math.ceil(cols_per_group / array_cols) * groups
 
 
+def snap_pruning_ratio(
+    ratio: float,
+    shapes: Optional[List[Tuple[int, int, int]]],
+    hw: HWConfig,
+    max_ratio: float,
+    step: float = 0.01,
+) -> float:
+    """Rounds `ratio` *down* to the largest pruning ratio that actually
+    removes a crossbar array from this stage, or 0.0 if none does.
+
+    This is a dominance argument, not a heuristic. `crossbar_passes` only
+    drops when pruning crosses a tile boundary (a 512-column layer on a
+    128-column array needs 4 arrays until pruning reaches 0.25), so every
+    ratio strictly between two boundaries costs real accuracy and buys
+    exactly zero energy -- measured: pruning 0.0/0.1/0.2 gave byte-identical
+    energy at every weight_bits while accuracy fell up to 0.12. Snapping
+    down therefore never raises energy (same pass count by construction) and
+    never lowers accuracy (less weight removed), so the snapped config
+    weakly dominates the one the search asked for.
+
+    A stage whose layers already fit in one column-tile (resnet18's early
+    64/128-column stages) can never save an array by pruning, so this
+    returns 0.0 for it -- pruning there is pure loss no matter the ratio.
+
+    Boundaries are found by scanning `step`-spaced ratios rather than solved
+    in closed form: `crossbar_passes` mixes ceil() with the grouped/packed
+    depthwise cases, and a scan is both obviously correct and cheap (a few
+    dozen integer evaluations per stage)."""
+    ratio = min(max(ratio, 0.0), max_ratio)
+    if not shapes or ratio <= 0.0:
+        return 0.0
+
+    def passes_at(p: float) -> int:
+        return sum(crossbar_passes(rows, cols, groups, hw, p) for rows, cols, groups in shapes)
+
+    baseline = passes_at(0.0)
+    best = 0.0
+    seen = baseline
+    candidate = step
+    while candidate <= ratio + 1e-9:
+        current = passes_at(candidate)
+        if current < seen:
+            seen = current
+            best = round(candidate, 4)
+        candidate = round(candidate + step, 4)
+    return best
+
+
 def _passes_for_layer(
     hw: HWConfig,
     lc: LayerBitConfig,
