@@ -248,7 +248,7 @@ def _warmup_group_html(group: List[Dict[str, Any]]) -> str:
     """Collapses a contiguous run of LHS warm-up rows into one
     <details>-backed summary row (native disclosure, no JS) instead of
     `warmup_count(n_stages)` individual ones -- at the real max
-    (nodes/planner.py's `_MAX_WARMUP_CANDIDATES` = 12) those would
+    (nodes/planner.py's `_MAX_WARMUP_CANDIDATES`) those would
     otherwise dominate the table before the surrogate-guided search even
     starts, and (unlike a real planner decision) their rationale never
     varies with anything a reader would compare row-to-row (tools/
@@ -334,14 +334,18 @@ def _calibration_section_html(state: AutoCIMState) -> str:
             f"&#10003; hw_spec_id={hw_spec_id_esc} is calibrated: analytical energy is scaled by "
             f"<strong>{factor:.4f}x</strong> against this run's own Stage-2 precision re-check "
             f"({raw_energy} &rarr; {precise_energy} pJ, iteration {provenance.get('iteration')}) -- "
-            "<em>mock placeholder re-check (tools/precision_check.py), not a real NeuroSim/CIM-Loop "
-            "measurement yet</em>."
+            "<em>ADC energy is always a real literature-fit model (hwcomponents_adc); DAC/crossbar-MAC/"
+            "SRAM-buffer energy are real device models too (hwcomponents_neurosim/hwcomponents_cacti) "
+            "only where this session ran with those Docker-only packages installed, analytical "
+            "placeholders otherwise (tools/precision_check.py)</em>."
         )
         precision_ok_ko = (
             f"&#10003; hw_spec_id={hw_spec_id_esc}는 캘리브레이션되었습니다: 분석적 에너지 추정값을 이번 실행 "
             f"자체의 2단계 정밀 재검증 결과({raw_energy} &rarr; {precise_energy} pJ, iteration "
-            f"{provenance.get('iteration')}) 대비 <strong>{factor:.4f}배</strong>로 보정했습니다 -- <em>실제 "
-            "NeuroSim/CIM-Loop 측정이 아닌 mock 자리 표시자 재검증(tools/precision_check.py)입니다</em>."
+            f"{provenance.get('iteration')}) 대비 <strong>{factor:.4f}배</strong>로 보정했습니다 -- <em>ADC 에너지는 "
+            "항상 실제 문헌 기반 모델(hwcomponents_adc)이고, DAC/크로스바-MAC/SRAM 버퍼 에너지는 이번 실행이 "
+            "해당 Docker 전용 패키지(hwcomponents_neurosim/hwcomponents_cacti)가 설치된 환경에서 돌았을 때만 "
+            "실제 소자 모델이며, 그렇지 않으면 analytical 자리 표시자입니다(tools/precision_check.py)</em>."
         )
         return f'<p class="calib-ok">{_bi(precision_ok_en, precision_ok_ko)}</p>'
 
@@ -383,7 +387,12 @@ def render_dashboard_html(state: AutoCIMState) -> str:
     usage = _llm_usage_summary(state)
 
     title = f"{state.get('model_id')} / {state.get('hw_spec_id')}"
-    converged = state.get("is_converged")
+    low_confidence = bool(state.get("low_confidence_conclusion"))
+    # low_confidence_conclusion (hitl_node's conclude-with-best path, see
+    # state.py's field docstring) also sets is_converged=True so the graph
+    # can still route to END -- the badge below must not read that as a
+    # real target-meeting convergence.
+    converged = bool(state.get("is_converged")) and not low_confidence
     llm_summary_en = (
         f'LLM calls: {usage["n_calls"]} node-invocation(s), {usage["total_attempts"]} total attempt(s), '
         f'{usage["n_failed"]} failed after retries'
@@ -505,8 +514,10 @@ def render_dashboard_html(state: AutoCIMState) -> str:
   <span class="chip">hw_spec_id <strong>{html.escape(str(state.get("hw_spec_id")))}</strong></span>
   <span class="chip">iteration_count <strong>{state.get("iteration_count")}</strong></span>
   <span class="chip {"status-ok" if converged else "status-pending"}">is_converged <strong>{converged}</strong></span>
+  {f'<span class="chip status-pending">{_bi("low-confidence conclusion", "낮은 신뢰도 종결")} <strong>{_bi("review before trusting", "신뢰 전 검토 필요")}</strong></span>' if low_confidence else ""}
 </div>
 <p class="summary">{_bi(llm_summary_en, llm_summary_ko)}</p>
+{f'<p class="calib-warning">{_bi("This session gave up without meeting every configured target -- the reported candidate is just the best one the search tried, not a real convergence.", "이 세션은 설정된 목표를 모두 충족하지 못한 채 종료됐습니다 -- 보고된 후보는 탐색이 시도한 것 중 최선일 뿐, 실제 수렴이 아닙니다.")}</p>' if low_confidence else ""}
 
 <h2>{_bi("Search progress", "검색 진행 상황")}</h2>
 {_search_phase_summary_html(rows)}
