@@ -51,6 +51,8 @@ def build_execution_context(state: AutoCIMState) -> ExecutionContext:
     return ExecutionContext(
         session_id=run_id_for(state),
         model_id=state["model_id"],
+        dataset_id=state.get("dataset_id"),
         hw_spec_id=state["hw_spec_id"],
+        run_seed=state.get("run_seed", 0),
         iteration_count=state.get("iteration_count", 0),
     )
