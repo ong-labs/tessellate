@@ -72,7 +72,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nodes.evaluator import build_candidate_entry, validate_metrics
-from nodes.planner import points_to_stage_configs, real_stage_names, search_bounds, search_seed_for, warmup_count
+from nodes.planner import (
+    _snapping_context,
+    points_to_stage_configs,
+    real_stage_names,
+    search_bounds,
+    search_seed_for,
+    warmup_count,
+)
 from schemas.config import ExecutionContext, HWConfig
 from schemas.tools import MapperToolInput, ProfilerToolInput, ToolStatus, TunerToolInput, VerifierToolInput
 from tools.qat import resolve_max_epochs
@@ -229,7 +236,13 @@ def run_parallel_warmup(
     seed = search_seed_for(model_id, hw_config.hw_spec_id, run_seed)
 
     stage_points = latin_hypercube_stage_candidates(n_warmup, len(stage_names), bit_bounds, pruning_bounds, seed)
-    layer_configs_per_candidate = [points_to_stage_configs(points, stage_names) for points in stage_points]
+    # Same snapping context the sequential planner path uses -- the parallel
+    # warm-up must reproduce, not diverge from, what @planner would have
+    # produced for these same LHS points (this module's own docstring).
+    snap_hw, snap_shapes = _snapping_context(model_id, hw_config.hw_spec_id)
+    layer_configs_per_candidate = [
+        points_to_stage_configs(points, stage_names, snap_hw, snap_shapes) for points in stage_points
+    ]
 
     resolved_max_workers = max_workers if max_workers is not None else min(n_warmup, os.cpu_count() or 1)
     resolved_max_workers = max(1, resolved_max_workers)
