@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from schemas.config import HWConfig, NoCTopology
 from schemas.tools import LayerBitConfig
@@ -104,22 +104,39 @@ def hop_distance(topology: NoCTopology, i: int, j: int, ring_or_grid_size: int) 
 
 
 def simulate_noc_mapping(
-    hw: HWConfig, layer_configs: List[LayerBitConfig], params: CIMTechParams = CIM_TECH_PARAMS
+    hw: HWConfig,
+    layer_configs: List[LayerBitConfig],
+    params: CIMTechParams = CIM_TECH_PARAMS,
+    stage_weight_shapes: Optional[Dict[str, List[Tuple[int, int, int]]]] = None,
 ) -> Dict[str, Any]:
-    """Assumption: one crossbar tile per `layer_configs` entry (a tile's
-    `crossbar_rows` x `crossbar_cols` array is assumed large enough for one
-    layer's pruned/quantized weight matrix), placed in `layer_configs` order
-    and pipelined tile-to-tile -- the standard layer-pipelined CIM dataflow.
-    Real per-hop topology distance (`hop_distance`) and bandwidth-limited
-    transfer time; `noc_link_bandwidth_gbps` (Gb/s) converts to bits/ns
-    directly (1 Gb/s == 1 bit/ns), so no unit-conversion constant is needed
-    beyond the documented flit header size.
+    """Layers are placed in `layer_configs` order and pipelined tile-to-tile
+    -- the standard layer-pipelined CIM dataflow. Real per-hop topology
+    distance (`hop_distance`) and bandwidth-limited transfer time;
+    `noc_link_bandwidth_gbps` (Gb/s) converts to bits/ns directly
+    (1 Gb/s == 1 bit/ns), so no unit-conversion constant is needed beyond
+    the documented flit header size.
+
+    `stage_weight_shapes` (`tools.qat.get_stage_weight_shapes`) gives each
+    entry its real tile count (`crossbar_passes`); without it this falls
+    back to the old one-tile-per-entry assumption, which silently claimed
+    any layer fits one array -- resnet18's `layer4.1` alone really needs
+    288 tiles on a 128x128 array, so `tile_utilization` was reported as
+    comfortably under 1.0 for workloads that in fact overflow the chip
+    many times over.
+
+    Note the two counts are deliberately different things: `tiles_needed`
+    is every array activation the workload requires, while the transfer
+    loop below stays *per layer boundary*. Tiles within one layer hold
+    slices of the same weight matrix and merge partial sums locally; it is
+    only the layer-to-layer activation hand-off that crosses the NoC in
+    this pipelined dataflow, so inflating the transfer count by intra-layer
+    tiles would model traffic that doesn't exist.
     """
-    tiles_needed = len(layer_configs)
+    tiles_needed = sum(_passes_for_layer(hw, lc, stage_weight_shapes) for lc in layer_configs)
     bandwidth_bits_per_ns = hw.noc_link_bandwidth_gbps
 
     total_latency_ns = 0.0
-    for idx in range(1, tiles_needed):
+    for idx in range(1, len(layer_configs)):
         hops = hop_distance(hw.noc_topology, idx - 1, idx, hw.num_tiles)
         payload_bits = hw.crossbar_cols * layer_configs[idx].activation_bits
         serialization_ns = payload_bits / bandwidth_bits_per_ns
@@ -138,12 +155,86 @@ def simulate_noc_mapping(
 
 
 # ---------------------------------------------------------------------------
+# Real weight-matrix -> crossbar pass mapping
+# ---------------------------------------------------------------------------
+
+
+def crossbar_passes(rows: int, cols: int, groups: int, hw: HWConfig, pruning_ratio: float = 0.0) -> int:
+    """How many `hw.crossbar_rows x hw.crossbar_cols` array activations a
+    weight matrix of shape `(rows, cols)` with `groups` groups really costs.
+
+    `rows`/`cols`/`groups` come from `tools.qat.get_stage_weight_shapes`
+    (`rows` is the *per-group* input length). Three cases:
+
+    - **Dense / pointwise (`groups == 1`)**: the ordinary tiled GEMM
+      mapping -- `ceil(rows/R) * ceil(cols/C)` arrays. This alone is the
+      dominant correction: a stage is a group of layers, and a single
+      3x3x512x512 conv already needs 144 passes on a 128x128 array, so
+      charging one array per stage understated resnet18 by ~70x.
+    - **Depthwise (`groups == in_channels`, and any grouped conv)**: the
+      matrix is block-diagonal -- group `i` only connects its own `rows`
+      inputs to its own `cols/groups` outputs. Packing those small blocks
+      down the diagonal of one array fits
+      `min(R//rows, C//cols_per_group)` groups per activation, so a
+      960-group 3x3 depthwise layer costs ~69 passes, not 960.
+    - **A group too large to pack** (a block wider/taller than the array
+      itself) falls back to tiling each group independently.
+
+    The packing assumption is load-bearing and deliberately documented
+    rather than hidden: measured on mobilenet_v2, packed vs. one-array-per-
+    group differ by ~10x in total passes (746 vs. 7363). Packing is what
+    real CIM accelerators do with depthwise layers, so it is the default
+    here -- but it is an assumption about the *mapper*, not a device
+    constant, which is precisely why this project reports depthwise-heavy
+    numbers as approximations (see `CIMTechParams`' own docstring on the
+    calibration escape hatch).
+
+    `pruning_ratio` is `LayerBitConfig.column_pruning_ratio`: structured
+    column pruning physically removes output channels, so it shrinks `cols`
+    before tiling. Without this, pruning was a pure accuracy cost with no
+    energy reward anywhere in the model, and the multi-objective search had
+    no reason to ever prune."""
+    effective_cols = max(1, int(cols * (1.0 - min(max(pruning_ratio, 0.0), 1.0))))
+    array_rows, array_cols = hw.crossbar_rows, hw.crossbar_cols
+
+    if groups <= 1:
+        return math.ceil(rows / array_rows) * math.ceil(effective_cols / array_cols)
+
+    cols_per_group = max(1, effective_cols // groups)
+    groups_per_array = min(array_rows // rows, array_cols // cols_per_group) if rows <= array_rows else 0
+    if groups_per_array >= 1:
+        return math.ceil(groups / groups_per_array)
+    # A single group already exceeds the array -- tile each one separately.
+    return math.ceil(rows / array_rows) * math.ceil(cols_per_group / array_cols) * groups
+
+
+def _passes_for_layer(
+    hw: HWConfig,
+    lc: LayerBitConfig,
+    stage_weight_shapes: Optional[Dict[str, List[Tuple[int, int, int]]]],
+) -> int:
+    """Total array activations one `layer_configs` entry costs. Falls back
+    to 1 (the old shape-blind behavior) when no shape is known for this
+    entry -- a synthetic probe layer (`tools.calibration`) or a model whose
+    stage names don't resolve, rather than guessing a shape."""
+    if not stage_weight_shapes:
+        return 1
+    shapes = stage_weight_shapes.get(lc.layer_name)
+    if not shapes:
+        return 1
+    return sum(crossbar_passes(rows, cols, groups, hw, lc.column_pruning_ratio) for rows, cols, groups in shapes)
+
+
+# ---------------------------------------------------------------------------
 # @profiler: CIM device-physics energy/latency model
 # ---------------------------------------------------------------------------
 
 
 def simulate_cim_profile(
-    hw: HWConfig, layer_configs: List[LayerBitConfig], params: CIMTechParams = CIM_TECH_PARAMS
+    hw: HWConfig,
+    layer_configs: List[LayerBitConfig],
+    params: CIMTechParams = CIM_TECH_PARAMS,
+    stage_weight_shapes: Optional[Dict[str, List[Tuple[int, int, int]]]] = None,
 ) -> Dict[str, Any]:
     """See module docstring for the scaling relationships. `compute_energy_pj`
     sums per-layer ADC + DAC + crossbar-MAC energy across all `layer_configs`
@@ -158,16 +249,29 @@ def simulate_cim_profile(
     @evaluator's Pareto ranking and target-checking actually use.
     `latency_ns` sums per-layer ADC/DAC conversion time, since a CIM
     crossbar's row x col MAC itself completes in parallel per cycle (the
-    array-size term does not appear in the latency model, only in energy)."""
+    array-size term does not appear in the latency model, only in energy).
+
+    `stage_weight_shapes` (`tools.qat.get_stage_weight_shapes`, keyed by
+    `LayerBitConfig.layer_name`) is what makes each entry cost its *real*
+    number of array activations (`crossbar_passes`) instead of exactly one.
+    Omitting it keeps the old one-full-array-per-entry behavior, which is
+    correct only for a caller whose entry really is a single full array --
+    `tools.calibration.compute_calibration_factor`'s synthetic probe layer
+    is exactly that case, and deliberately passes nothing here. Every real
+    profiling caller (`tools.simulators.profiler_tool`) passes real shapes;
+    without them, resnet18's energy came out ~70x low and mobilenet_v2's
+    ~37x low, i.e. wrong by an architecture-dependent factor that silently
+    biased cross-architecture comparisons."""
     total_compute_energy_fj = 0.0
     total_latency_ns = 0.0
 
     for lc in layer_configs:
+        passes = _passes_for_layer(hw, lc, stage_weight_shapes)
         adc_energy_fj = params.adc_ref_energy_fj * (2**hw.adc_bits) * hw.crossbar_cols
         dac_energy_fj = params.dac_ref_energy_fj * hw.dac_bits * hw.crossbar_rows
         crossbar_energy_fj = params.crossbar_ref_energy_fj * hw.crossbar_rows * hw.crossbar_cols * lc.weight_bits
-        total_compute_energy_fj += adc_energy_fj + dac_energy_fj + crossbar_energy_fj
-        total_latency_ns += hw.adc_bits * params.adc_cycle_time_ns + hw.dac_bits * params.dac_settle_time_ns
+        total_compute_energy_fj += passes * (adc_energy_fj + dac_energy_fj + crossbar_energy_fj)
+        total_latency_ns += passes * (hw.adc_bits * params.adc_cycle_time_ns + hw.dac_bits * params.dac_settle_time_ns)
 
     buffer_bits = (hw.sram_buffer_kb or 0.0) * 8 * 1024
     buffer_energy_fj = params.sram_buffer_ref_energy_fj_per_bit * buffer_bits
