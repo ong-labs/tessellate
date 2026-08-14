@@ -60,7 +60,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from llm import LLMCallFailed, LLMCallRecord, check_budget, get_planner_chat_model, invoke_with_retry
+from llm import (
+    LLMCallFailed,
+    LLMCallRecord,
+    check_budget,
+    get_fallback_chat_model,
+    get_planner_chat_model,
+    invoke_with_retry_and_fallback,
+)
 from middleware import get_hw_config
 from nodes.common import run_id_for
 from observability import log_event
@@ -68,7 +75,16 @@ from schemas.planner import PlannerLayerDecision
 from schemas.tools import LayerBitConfig
 from state import AutoCIMState, merge_dicts
 from tools.qat import get_layer_groups
-from tools.search import Bounds, StagePoint, propose_stage_candidates_via_surrogate, warmup_stage_candidate
+from tools.search import (
+    Bounds,
+    StagePoint,
+    propose_stage_candidate_random,
+    propose_stage_candidate_single_objective,
+    propose_stage_candidates_via_surrogate,
+    warmup_stage_candidate,
+)
+
+SEARCH_STRATEGIES = ("multi_objective", "single_objective", "random")
 
 _FALLBACK_STAGE_NAME = "model_default"
 
@@ -85,32 +101,49 @@ _TOOL_NAME = PlannerLayerDecision.__name__
 # 12-40-dimensional search space (curse of dimensionality), but scaling
 # unboundedly (e.g. the textbook ~10x-dimensions BO heuristic) would mean
 # hundreds of real QAT trials at 37s-2min each before the surrogate phase
-# even starts. `warmup_count` is the deliberate middle ground: at least
-# one warm-up sample per stage, capped at `_MAX_WARMUP_CANDIDATES` so a
-# 20-stage model (mobilenet_v2) still bounds warm-up wall-clock instead of
-# scaling with model size.
+# even starts. `warmup_count` is the deliberate middle ground:
+# `_WARMUP_SAMPLES_PER_STAGE` warm-up samples per stage (not just one --
+# measured via tools/baseline_compare.py that a flat 1x ratio left
+# resnet18's surrogate (10 stages -> exactly 10 real warm-up points over a
+# 20-dim space) unreliable at holding a specific --target-accuracy: only
+# 1/3 seeds converged within the auto-hitl retry budget), capped at
+# `_MAX_WARMUP_CANDIDATES` so a 20-stage model (mobilenet_v2) still bounds
+# warm-up wall-clock instead of scaling with model size -- raised from 12
+# alongside the per-stage multiplier so it doesn't immediately re-cap
+# resnet18's now-larger warm-up count back down to the old value.
 _WARMUP_CANDIDATES = 3
-_MAX_WARMUP_CANDIDATES = 12
+_WARMUP_SAMPLES_PER_STAGE = 1.5
+_MAX_WARMUP_CANDIDATES = 20
 _WEIGHT_BITS_MIN = 2
 _PRUNING_RATIO_MAX = 0.5
 
 
 def warmup_count(n_stages: int) -> int:
-    return min(_MAX_WARMUP_CANDIDATES, max(_WARMUP_CANDIDATES, n_stages))
+    return min(_MAX_WARMUP_CANDIDATES, max(_WARMUP_CANDIDATES, round(n_stages * _WARMUP_SAMPLES_PER_STAGE)))
 
 
-def search_seed_for(model_id: str, hw_spec_id: str) -> int:
-    """Deterministic per-`(model_id, hw_spec_id)` seed for LHS warm-up
-    sampling -- crc32, not Python's builtin `hash()`, since str hashing is
-    randomized per-process (`PYTHONHASHSEED`) unless disabled, which would
-    make "same warm-up index -> same point" false across runs/processes.
-    Public (not just inlined in `_propose_stage_points`) so
-    `tools/batch_warmup.py`'s parallel warm-up runner derives the exact
-    same seed the sequential path would have used for this
-    `(model_id, hw_spec_id)` -- computing all warm-up points up front must
-    reproduce, not diverge from, what `_propose_stage_points` would have
-    produced one at a time."""
-    return zlib.crc32(f"{model_id}::{hw_spec_id}".encode())
+def search_seed_for(model_id: str, hw_spec_id: str, run_seed: int = 0) -> int:
+    """Deterministic per-`(model_id, hw_spec_id, run_seed)` seed for LHS
+    warm-up sampling + NSGA-II acquisition -- crc32, not Python's builtin
+    `hash()`, since str hashing is randomized per-process
+    (`PYTHONHASHSEED`) unless disabled, which would make "same warm-up
+    index -> same point" false across runs/processes. Public (not just
+    inlined in `_propose_stage_points`) so `tools/batch_warmup.py`'s
+    parallel warm-up runner derives the exact same seed the sequential
+    path would have used for this `(model_id, hw_spec_id, run_seed)` --
+    computing all warm-up points up front must reproduce, not diverge
+    from, what `_propose_stage_points` would have produced one at a time.
+
+    `run_seed` (state.py's `run_seed`, `AutoCIMState`) defaults to 0,
+    identical to this function's behavior before the parameter existed --
+    without it, *every* session on the same (model_id, hw_spec_id) always
+    explored the exact same warm-up points and NSGA-II trajectory, so
+    running "the same search" more than once could never produce an
+    independent sample: `tools/repeat_search.py`'s whole premise (N
+    independent replicates for a variance/CI estimate a single run can't
+    give) needs `run_seed` to actually vary the search, not just the seed
+    number's cosmetic value."""
+    return zlib.crc32(f"{model_id}::{hw_spec_id}::{run_seed}".encode())
 
 
 _SYSTEM_PROMPT = (
@@ -201,11 +234,30 @@ def _propose_stage_points(
     bit_bounds, pruning_bounds = search_bounds(state["hw_spec_id"], overrides)
     history = state.get("candidate_history", [])
     n_warmup = warmup_count(len(stage_names))
-    seed = search_seed_for(state["model_id"], state["hw_spec_id"])
+    seed = search_seed_for(state["model_id"], state["hw_spec_id"], state.get("run_seed", 0))
 
     if len(history) < n_warmup:
         point = warmup_stage_candidate(len(history), n_warmup, len(stage_names), bit_bounds, pruning_bounds, seed)
         return point, f"LHS warm-up candidate {len(history) + 1}/{n_warmup}"
+
+    # Warm-up is always real LHS regardless of strategy -- ablation
+    # (tools/run_ablation.py) only varies the *acquisition* phase after
+    # warm-up, so every strategy starts every replicate from the same kind
+    # of cold-start history, isolating the comparison to the one thing
+    # actually being ablated.
+    strategy = state.get("search_strategy") or "multi_objective"
+    # iteration-varying seed offset: propose_stage_candidate_random has no
+    # history to diversify against (unlike the surrogate strategies, whose
+    # predictions already shift every call as history grows), so reusing
+    # one fixed seed across the whole surrogate phase would repeat the
+    # exact same "random" point on every iteration.
+    iteration_seed = seed + len(history)
+    if strategy == "random":
+        point = propose_stage_candidate_random(stage_names, bit_bounds, pruning_bounds, iteration_seed)
+        return point, "random-search acquisition (ablation baseline, no surrogate)"
+    if strategy == "single_objective":
+        point = propose_stage_candidate_single_objective(history, stage_names, bit_bounds, pruning_bounds, seed)
+        return point, f"single-objective surrogate acquisition over {len(history)} prior candidates (ablation baseline)"
     point = propose_stage_candidates_via_surrogate(history, stage_names, bit_bounds, pruning_bounds, seed)
     return point, f"surrogate-model acquisition over {len(history)} prior candidates"
 
@@ -284,26 +336,34 @@ def _explain_decision(
     stage_configs: List[LayerBitConfig],
     iteration_count: int,
 ) -> Tuple[str, Optional[str], Optional[str], "LLMCallRecord"]:
-    """Real LLM call, retried on transient errors via `llm.invoke_with_retry`
-    (rate limits/timeouts/5xx -- see llm.py), then forced through
+    """Real LLM call, retried on transient errors via
+    `llm.invoke_with_retry_and_fallback` (rate limits/timeouts/5xx -- see
+    llm.py) -- if the primary provider stays down through every retry, this
+    automatically fails over to `llm.get_fallback_chat_model()` (the local
+    default) and retries there before giving up, instead of immediately
+    falling back to the template rationale. Then forced through
     tool-calling. Raises `LLMCallFailed` -- carrying the real attempts/
     tokens/cost `LLMCallRecord` even for this failure, so a billable call
     that came back malformed still gets logged accurately -- on any failure
-    the retry layer didn't absorb (including a well-formed response with no
-    usable tool call); the caller must catch that and fall back to its own
-    template rationale. `get_planner_chat_model()` itself raising (e.g.
-    missing API key/model env var) is not caught here -- that's a config
-    problem retrying can't fix, and has no LLM call to build a record from;
-    the caller handles it as a plain exception. This overall containment
-    mirrors `middleware.wrap_tool_call`'s containment of backend-tool
-    exceptions.
+    neither the retry nor the provider-fallback layer absorbed (including a
+    well-formed response with no usable tool call); the caller must catch
+    that and fall back to its own template rationale. `get_planner_chat_model()`
+    itself raising (e.g. missing API key/model env var) is not caught here --
+    that's a config problem retrying can't fix, and has no LLM call to build
+    a record from; the caller handles it as a plain exception. This overall
+    containment mirrors `middleware.wrap_tool_call`'s containment of
+    backend-tool exceptions.
 
     Returns `(rationale, rationale_ko, anomaly_note, usage_record)` --
     notably no `layer_configs`: `stage_configs` (the search's own output)
     is what the caller actually uses, unconditionally (module docstring)."""
     chat_model = get_planner_chat_model().bind_tools([PlannerLayerDecision], tool_choice=_TOOL_NAME)
-    response, usage_record = invoke_with_retry(
+    fallback_model = get_fallback_chat_model()
+    if fallback_model is not None:
+        fallback_model = fallback_model.bind_tools([PlannerLayerDecision], tool_choice=_TOOL_NAME)
+    response, usage_record = invoke_with_retry_and_fallback(
         chat_model,
+        fallback_model,
         [
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(content=_build_user_prompt(state, overrides, search_tag, stage_configs)),
