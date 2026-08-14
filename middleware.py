@@ -13,6 +13,18 @@ Two independent concerns live here (docs/coding_guidelines.md 5.D):
 
 2. Context Pruning / Summarization -- bounds how much history is handed to
    the LLM on each turn, to prevent token overflow.
+
+   **Not currently wired into any caller.** `nodes/planner.py` -- this
+   project's only LLM call site -- builds its prompt from structured state
+   fields (`_build_user_prompt`: the proposed candidate, hw bounds, the last
+   three `failure_history` entries) rather than from `state["messages"]`, so
+   nothing today grows with iteration count and there is no overflow for
+   these helpers to bound. `messages` itself still accumulates (its
+   `operator.add` reducer, state.py) but is only ever read back by humans
+   and `tools/dashboard.py`. Kept as the ready interface for a future
+   message-driven prompt; `get_pruned_context`/`summarize_tool_result_for_messages`
+   having no production caller is the accurate current state, not an
+   oversight to be read as "context pruning is active".
 """
 
 from __future__ import annotations
