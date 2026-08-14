@@ -181,7 +181,18 @@ python main.py --model-id resnet18 --dashboard-out report.html
 
 Groq/Gemini를 쓰려면 `pip install -r requirements.txt`에 이미 포함된 `langchain-groq`/`langchain-google-genai`가 필요하고, 각각 `GROQ_API_KEY`/`GOOGLE_API_KEY` 환경변수를 설정하면 됩니다.
 
-> ⚠️ **`main.py`의 에너지 수치를 `tools/baseline_compare.py` 결과와 나란히 비교하려면 `.cache/long_term_store.sqlite`를 먼저 비우세요.** `main.py`는 교차 세션 학습(`store.py`)을 해서, 이전 세션이 저장한 보정계수와 Pareto 후보를 다음 세션이 이어받습니다. 그러면 (1) 문헌 부트스트랩(`tools/calibration.py`) 대신 **학습된 계수**로 시작하고, (2) 이어받은 후보가 있으면 **LHS 워밍업을 통째로 건너뜁니다**. 반면 `baseline_compare`/`optuna_compare`는 학습을 하지 않고 항상 문헌값을 씁니다 — 실제로 이 차이 때문에 같은 하드웨어·같은 모델인데 대시보드 에너지가 8배(414.37x vs 51.85x) 어긋난 적이 있습니다. 학습 자체는 의도된 기능이지만, **두 경로의 수치를 같은 표에 올릴 때는 기준을 맞춰야 합니다.**
+### 교차 세션 학습과 재현성
+
+`main.py`는 교차 세션 학습(`store.py`)을 합니다 — 이전 세션이 저장한 보정계수와 Pareto 후보를 다음 세션이 이어받아, 같은 하드웨어를 반복 실행할 때 정밀 시뮬레이션을 다시 하지 않습니다. 의도된 기능이지만 두 가지 함정이 있었고, 둘 다 실제로 겪은 뒤 제거했습니다.
+
+- **물리 모델이 바뀌면 옛 데이터가 조용히 섞이던 문제** → `tools/cim_physics.py`의 `ENERGY_MODEL_VERSION`으로 해소. 에너지에서 파생된 저장 항목(보정계수, Pareto 후보)은 이 버전을 키에 붙여 저장하므로, 물리 모델이 바뀌면 이전 항목이 **자동으로 보이지 않게 되어** 콜드 스타트합니다. 실제 사고: v1(항목당 크로스바 1개)에서 저장된 후보 5개가 v2(실제 패스 수) 실행에 로드되어 **약 70배 차이 나는 에너지가 한 표에 섞였습니다.**
+- **학습된 계수와 문헌 계수가 달라 비교가 깨지던 문제** → `--ignore-learned-state` 플래그로 해소. `baseline_compare`/`optuna_compare`는 학습을 하지 않고 항상 문헌 부트스트랩을 쓰므로, `main.py` 결과를 그 수치와 나란히 놓으려면 이 플래그가 필요합니다 (실측: 문헌 414.37x vs 학습 51.85x, 동일 하드웨어에서 **8배 차이**). 이 플래그는 워밍업 건너뛰기도 함께 막아, LHS 워밍업이 정상적으로 수행됩니다.
+
+```bash
+# baseline_compare/optuna_compare 수치와 비교할 세션
+python main.py --model-id resnet18 --hw-config examples/hw_configs/default_cim_v1_128x128.json \
+  --ignore-learned-state --target-accuracy 0.7
+```
 
 **`--hw-config`를 생략하고 터미널에서 직접 실행하면**, 매번 JSON 파일 경로를 손으로 쓰는 대신 대화형으로 물어봅니다: (1) 커스텀 값 직접 입력 (2) 저장된 예시 파일(`examples/hw_configs/`) 중 선택 (3) 기본값 사용. 직접 입력 시 각 필드에서 `b`(또는 `back`/`뒤로`)를 입력하면 바로 앞 필드로 돌아가 다시 입력할 수 있고(맨 첫 필드에서 입력하면 [1]/[2]/[3] 메뉴로 돌아감), 스키마 검증에 실패해도(예: `noc_topology`에 오타) 이미 입력한 다른 필드는 그대로 유지된 채 문제된 필드만 원래 기본값으로 재설정됩니다. 입력한 스펙이 `tools/calibration.py`의 레퍼런스와 정확히 일치하지 않으면, 그 자리에서 가장 가까운 레퍼런스로 근사 보정할지 물어보며 기본값은 "예"입니다(`--exact-calibration-only`로 전역 opt-out과 동일한 효과를 내려면 그 자리에서 "n"으로 답하면 됩니다). `--hw-config`를 명시하거나 스크립트/CI처럼 터미널이 아닌 환경에서 실행하면 이 프롬프트는 뜨지 않고 기존과 동일하게 동작합니다.
 
