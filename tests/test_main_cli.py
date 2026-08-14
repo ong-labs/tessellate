@@ -1329,3 +1329,16 @@ def test_main_loads_dotenv_then_dotenv_local_with_override(monkeypatch, tmp_path
     second_args, second_kwargs = calls[1]
     assert first_args == () and not first_kwargs.get("override")  # plain .env, no override
     assert second_args == (".env.local",) and second_kwargs.get("override") is True
+
+
+def test_ignore_learned_state_flag_defaults_off_and_parses(monkeypatch):
+    """Cross-session learning stays the default -- the opt-out exists for
+    runs whose numbers must line up with tools/baseline_compare.py, which
+    never learns (README's provider-table warning)."""
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["main.py", "--model-id", "resnet18"])
+    assert main.parse_args().ignore_learned_state is False
+
+    monkeypatch.setattr(sys, "argv", ["main.py", "--model-id", "resnet18", "--ignore-learned-state"])
+    assert main.parse_args().ignore_learned_state is True
