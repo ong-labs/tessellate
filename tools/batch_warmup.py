@@ -75,10 +75,9 @@ from nodes.evaluator import build_candidate_entry, validate_metrics
 from nodes.planner import points_to_stage_configs, real_stage_names, search_bounds, search_seed_for, warmup_count
 from schemas.config import ExecutionContext, HWConfig
 from schemas.tools import MapperToolInput, ProfilerToolInput, ToolStatus, TunerToolInput, VerifierToolInput
+from tools.qat import resolve_max_epochs
 from tools.search import latin_hypercube_stage_candidates
 from tools.simulators import mapper_tool, profiler_tool, tuner_tool, verifier_tool
-
-_DEFAULT_MAX_EPOCHS = 5  # mirrors nodes/tuner.py's _DEFAULT_MAX_EPOCHS -- kept in lockstep intentionally
 
 
 def _failed_result_dict(error: str) -> Dict[str, Any]:
@@ -86,7 +85,12 @@ def _failed_result_dict(error: str) -> Dict[str, Any]:
 
 
 def _evaluate_one_candidate(
-    model_id: str, hw_config: HWConfig, layer_configs: List[Any], calibration_factors: Optional[Dict[str, float]]
+    model_id: str,
+    hw_config: HWConfig,
+    layer_configs: List[Any],
+    calibration_factors: Optional[Dict[str, float]],
+    dataset_id: Optional[str] = None,
+    run_seed: int = 0,
 ) -> Dict[str, Any]:
     """Runs one candidate through the raw tuner/mapper/profiler/verifier
     functions (bypassing `wrap_tool_call`'s contextvar injection -- see
@@ -96,7 +100,9 @@ def _evaluate_one_candidate(
     execution_context = ExecutionContext(
         session_id=f"{model_id}::{hw_config.hw_spec_id}",
         model_id=model_id,
+        dataset_id=dataset_id,
         hw_spec_id=hw_config.hw_spec_id,
+        run_seed=run_seed,
         iteration_count=0,
     )
 
@@ -105,7 +111,7 @@ def _evaluate_one_candidate(
             execution_context=execution_context,
             hw_config=hw_config,
             layer_configs=layer_configs,
-            max_epochs=_DEFAULT_MAX_EPOCHS,
+            max_epochs=resolve_max_epochs(),
         )
     )
     tuner_dict = tuner_result.model_dump(mode="json")
@@ -168,6 +174,8 @@ def run_parallel_warmup(
     calibration_factors: Optional[Dict[str, float]] = None,
     max_workers: Optional[int] = None,
     on_progress: Optional[Callable[[int, int], None]] = None,
+    dataset_id: Optional[str] = None,
+    run_seed: int = 0,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Evaluates every LHS warm-up candidate for `(model_id, hw_config)`
     concurrently and returns `(candidate_history_entries, failure_entries,
@@ -218,7 +226,7 @@ def run_parallel_warmup(
     stage_names = real_stage_names(model_id)
     bit_bounds, pruning_bounds = search_bounds(hw_config.hw_spec_id)
     n_warmup = warmup_count(len(stage_names))
-    seed = search_seed_for(model_id, hw_config.hw_spec_id)
+    seed = search_seed_for(model_id, hw_config.hw_spec_id, run_seed)
 
     stage_points = latin_hypercube_stage_candidates(n_warmup, len(stage_names), bit_bounds, pruning_bounds, seed)
     layer_configs_per_candidate = [points_to_stage_configs(points, stage_names) for points in stage_points]
@@ -230,7 +238,15 @@ def run_parallel_warmup(
     raw_metrics_by_index: List[Optional[Dict[str, Any]]] = [None] * total
     with ThreadPoolExecutor(max_workers=resolved_max_workers) as executor:
         future_to_index = {
-            executor.submit(_evaluate_one_candidate, model_id, hw_config, layer_configs, calibration_factors): idx
+            executor.submit(
+                _evaluate_one_candidate,
+                model_id,
+                hw_config,
+                layer_configs,
+                calibration_factors,
+                dataset_id,
+                run_seed,
+            ): idx
             for idx, layer_configs in enumerate(layer_configs_per_candidate)
         }
         completed = 0
