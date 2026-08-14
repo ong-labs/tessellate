@@ -121,3 +121,35 @@ def test_good_hw_config_converges_without_ever_interrupting(state_factory, regis
 
     assert "__interrupt__" not in result
     assert result["is_converged"] is True
+
+
+def test_resuming_with_empty_bounds_restores_the_full_retry_budget(state_factory, registered_bad_hw_config):
+    """Regression (nodes/hitl.py): `main.py`'s override prompt explicitly
+    offers "빈칸=변경 없이 재시도", which resumes with `{"new_bounds": {}}`.
+    @planner's sanitization only fires when there *is* an override to
+    consume, so `retry_count` stayed at MAX_RETRY_LIMIT and @evaluator
+    re-fired HITL on every single following iteration -- the researcher was
+    prompted again after one iteration instead of after another full retry
+    budget. hitl_node now resets the counter on both resume shapes.
+    """
+    compiled = build_graph()
+    config = {"configurable": {"thread_id": "test-empty-bounds-thread"}}
+    init_state = state_factory(hw_spec_id=registered_bad_hw_config.hw_spec_id)
+
+    first = compiled.invoke(init_state, config=config)
+    assert first["retry_count"] == MAX_RETRY_LIMIT
+
+    resumed_chunks = list(
+        compiled.stream(Command(resume={"new_bounds": {}}), config=config, stream_mode="updates")
+    )
+
+    evaluator_updates = [chunk["evaluator"] for chunk in resumed_chunks if "evaluator" in chunk]
+    # The very next evaluation starts a fresh budget (retry 1 of
+    # MAX_RETRY_LIMIT), instead of continuing at MAX_RETRY_LIMIT + 1 and
+    # immediately demanding the researcher again.
+    assert evaluator_updates[0]["retry_count"] == 1
+    assert evaluator_updates[0]["needs_hitl"] is False
+    # And the still-bad HW does eventually pause again -- after a full
+    # budget, not after one iteration.
+    assert len(evaluator_updates) == MAX_RETRY_LIMIT
+    assert evaluator_updates[-1]["needs_hitl"] is True
