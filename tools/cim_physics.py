@@ -149,6 +149,20 @@ def simulate_noc_mapping(
     only the layer-to-layer activation hand-off that crosses the NoC in
     this pipelined dataflow, so inflating the transfer count by intra-layer
     tiles would model traffic that doesn't exist.
+
+    Of the four returned fields, only `noc_latency_ms` reaches a decision:
+    `verifier_tool` forwards it and nothing else from here, so
+    `tile_utilization`, `tiles_needed` and `buffer_delay_ms` are
+    reporting-only (`main.py`'s per-node stream line prints `tiles_needed`;
+    nothing reads the other two). In particular `tile_utilization` is
+    clamped to 1.0, so a workload needing more arrays than `hw.num_tiles`
+    -- resnet18 on a 16-tile chip really needs 571 -- reports full
+    utilization rather than overflow, and no node gates on it: this model
+    prices an unbounded number of array activations and does not check that
+    the design fits the chip. A real capacity constraint belongs in
+    `verifier_tool` alongside its IR-drop/noise check; it is not
+    implemented, and every energy/latency number here should be read as
+    "assuming the mapping fits".
     """
     tiles_needed = sum(_passes_for_layer(hw, lc, stage_weight_shapes) for lc in layer_configs)
     bandwidth_bits_per_ns = hw.noc_link_bandwidth_gbps
