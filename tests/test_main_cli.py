@@ -634,7 +634,7 @@ def test_prompt_for_override_choice_1_unavailable_reprompts_then_stops(monkeypat
     # choosing [1] must not silently do nothing or crash, just reprompt.
     _feed_inputs(monkeypatch, ["1", "3"])
     result = main.prompt_for_override(_hitl_payload(reason="verifier reported not converged"))
-    assert result is None
+    assert result == {"conclude_with_best": True}
     assert "추천값이 없습니다" in capsys.readouterr().out or "다른 항목을 선택" in capsys.readouterr().out
 
 
@@ -663,7 +663,7 @@ def test_prompt_for_override_choice_2_warns_on_unrecognized_key_but_still_applie
 def test_prompt_for_override_choice_2_back_returns_to_the_menu(monkeypatch):
     _feed_inputs(monkeypatch, ["2", "b", "3"])
     result = main.prompt_for_override(_hitl_payload())
-    assert result is None
+    assert result == {"conclude_with_best": True}
 
 
 def test_prompt_for_override_choice_2_blank_resumes_unchanged(monkeypatch):
@@ -674,13 +674,13 @@ def test_prompt_for_override_choice_2_blank_resumes_unchanged(monkeypatch):
 
 def test_prompt_for_override_choice_3_stops_the_run(monkeypatch):
     _feed_inputs(monkeypatch, ["3"])
-    assert main.prompt_for_override(_hitl_payload()) is None
+    assert main.prompt_for_override(_hitl_payload()) == {"conclude_with_best": True}
 
 
 def test_prompt_for_override_invalid_menu_choice_reprompts(monkeypatch, capsys):
     _feed_inputs(monkeypatch, ["9", "3"])
     result = main.prompt_for_override(_hitl_payload())
-    assert result is None
+    assert result == {"conclude_with_best": True}
     assert "잘못된 선택입니다" in capsys.readouterr().out
 
 
@@ -1025,12 +1025,12 @@ def test_list_sessions_reports_a_paused_session(monkeypatch, tmp_path, registere
 def test_run_session_choice_3_writes_a_report_even_when_none_was_configured(
     monkeypatch, tmp_path, registered_bad_hw_config
 ):
-    # prompt_for_override returning None simulates picking [3] 지금까지
-    # 결과를 리포트에 기록 후 종료 -- run_session must not just silently do
-    # nothing because --dashboard-out was never passed.
+    # prompt_for_override returning {"conclude_with_best": True} simulates
+    # picking [3] -- run_session must not just silently do nothing because
+    # --dashboard-out was never passed.
     reports_dir = tmp_path / "reports"
     monkeypatch.setattr(main, "REPORT_DIR", reports_dir)
-    monkeypatch.setattr("main.prompt_for_override", lambda payload: None)
+    monkeypatch.setattr("main.prompt_for_override", lambda payload: {"conclude_with_best": True})
     db_path = str(tmp_path / "checkpoints.sqlite")
     with SqliteSaver.from_conn_string(db_path) as checkpointer:
         run_session("resnet18", registered_bad_hw_config, "thread-choice3", checkpointer)
@@ -1152,13 +1152,16 @@ def test_run_session_persists_pareto_front_and_calibration_on_convergence(monkey
     model_store, hw_store = _long_term_stores(tmp_path)
     solutions = model_store.get_pareto_solutions(main._pareto_store_key("resnet18", registered_hw_config.hw_spec_id))
     assert solutions and len(solutions["candidates"]) >= 1
-    assert hw_store.get_calibration_factors(registered_hw_config.hw_spec_id) == {
-        # @precision_verifier's mock Stage-2 re-check (tools/precision_check.py)
-        # runs on this run's converged candidate and updates the factor from
-        # @profiler's own uncalibrated default (1.0) to the precise/raw ratio
-        # -- 1.0 + registered_hw_config's device_noise_sigma (0.05) here.
-        registered_hw_config.hw_spec_id: 1.05
-    }
+    # @precision_verifier's Stage-2 re-check (tools/precision_check.py) runs
+    # on this run's converged candidate and updates the factor from
+    # @profiler's own uncalibrated default (1.0) to precise/raw energy ratio
+    # -- precise_energy_pj now comes from a real ADC model (hwcomponents_adc),
+    # not a hand-computable constant, so this only checks that the factor
+    # actually got updated (not still the 1.0 default), not its exact value.
+    updated_factors = hw_store.get_calibration_factors(registered_hw_config.hw_spec_id)
+    assert updated_factors.keys() == {registered_hw_config.hw_spec_id}
+    assert updated_factors[registered_hw_config.hw_spec_id] != 1.0
+    assert updated_factors[registered_hw_config.hw_spec_id] > 0.0
 
 
 def test_run_session_seeds_candidate_history_from_a_previous_sessions_pareto_front(
