@@ -220,7 +220,9 @@ def precision_check_tool(args: PrecisionCheckToolInput) -> PrecisionCheckToolOut
     folding SRAM buffer energy into a MAC-scaling calibration ratio, and
     with `profiler_tool` only ever applying a calibration_factor to
     `compute_energy_pj`."""
-    result = simulate_precise_energy(args.hw_config, args.layer_configs)
+    result = simulate_precise_energy(
+        args.hw_config, args.layer_configs, _stage_shapes_for(args.execution_context.model_id)
+    )
     calibration_factor = compute_updated_calibration_factor(
         result["raw_compute_energy_pj"], result["precise_compute_energy_pj"]
     )
