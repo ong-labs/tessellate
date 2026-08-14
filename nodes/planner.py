@@ -202,7 +202,19 @@ def search_bounds(hw_spec_id: str, overrides: Optional[Dict[str, Any]] = None) -
     from smaller/local tool-calling models). Recognized keys: weight_bits_min,
     weight_bits_max, pruning_ratio_min, pruning_ratio_max -- all optional,
     and each can only narrow its dimension's hw-derived bound, never exceed
-    the physical adc_bits/dac_bits-derived ceiling."""
+    the physical adc_bits/dac_bits-derived ceiling.
+
+    Why `dac_bits` bounds *weight* bits: `points_to_stage_configs` sets
+    `activation_bits == weight_bits` (one searched precision per stage, not
+    two independent axes), and activation precision is what a DAC physically
+    drives, so the single searched value has to respect the tighter of the
+    two converter resolutions. The consequence is worth knowing when reading
+    a run: on a `dac_bits=4` spec (examples/hw_configs/default_cim_v1_128x128.json)
+    this caps the whole search at 4-bit weights regardless of how many
+    levels the crossbar cell could actually hold. Splitting weight and
+    activation precision into separate search dimensions -- so `adc_bits`
+    bounds one and `dac_bits` the other -- would remove that coupling, at
+    the cost of doubling the search space to `4 * n_stages`."""
     try:
         hw = get_hw_config(hw_spec_id)
         bits_max = min(8, hw.adc_bits, hw.dac_bits)
