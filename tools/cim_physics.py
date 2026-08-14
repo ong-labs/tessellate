@@ -13,14 +13,22 @@ device-physics and NoC-architecture scaling relationships:
   and weight bit-width (bit-serial CIM), and per-layer compute latency is
   bounded by ADC/DAC conversion time -- exploiting CIM's defining property
   that one crossbar performs a full row x col MAC in parallel per cycle.
+  These three terms are `simulate_cim_profile`'s `compute_energy_pj` --
+  the crossbar-macro-only quantity tools/calibration.py's literature
+  references measure and calibrate against.
+- SRAM buffer staging: a separate, one-time (not per-layer) cost for
+  filling `hw.sram_buffer_kb` worth of on-chip buffer, scaling linearly
+  with buffer size -- `simulate_cim_profile`'s `buffer_energy_pj`, deliberately
+  *not* part of `compute_energy_pj`/calibration (see that function's
+  docstring for why) but included in the total `energy_pj`.
 
 `CIM_TECH_PARAMS` are representative order-of-magnitude reference values,
 not silicon-measured numbers for any specific process node -- this is
 exactly why `AutoCIMState.calibration_factors` exists (Research_Plan.md 3):
 these are a *fast approximation*, meant to be scaled by a per-hw_spec_id
 factor learned against precise simulation over time (applied in
-tools/simulators.py's profiler_tool), not treated as ground truth on their
-own.
+tools/simulators.py's profiler_tool, to `compute_energy_pj` only), not
+treated as ground truth on their own.
 """
 
 from __future__ import annotations
@@ -52,6 +60,7 @@ class CIMTechParams:
     adc_cycle_time_ns: float = 0.1  # time per SAR-ADC bit-cycle
     dac_settle_time_ns: float = 0.05  # DAC settling time per bit
     router_flit_header_bits: int = 32  # standard NoC flit header overhead per hop
+    sram_buffer_ref_energy_fj_per_bit: float = 0.002  # energy per bit staged into the on-chip SRAM buffer, once per profile
 
 
 CIM_TECH_PARAMS = CIMTechParams()
@@ -136,23 +145,39 @@ def simulate_noc_mapping(
 def simulate_cim_profile(
     hw: HWConfig, layer_configs: List[LayerBitConfig], params: CIMTechParams = CIM_TECH_PARAMS
 ) -> Dict[str, Any]:
-    """See module docstring for the scaling relationships. `energy_pj` sums
-    per-layer ADC + DAC + crossbar-MAC energy across all `layer_configs`
-    entries; `latency_ns` sums per-layer ADC/DAC conversion time, since a
-    CIM crossbar's row x col MAC itself completes in parallel per cycle
-    (the array-size term does not appear in the latency model, only in
-    energy)."""
-    total_energy_fj = 0.0
+    """See module docstring for the scaling relationships. `compute_energy_pj`
+    sums per-layer ADC + DAC + crossbar-MAC energy across all `layer_configs`
+    entries -- this is the quantity tools/calibration.py's KNOWN_REFERENCES
+    calibrates against, since every published pJ/MAC figure there measures
+    only the crossbar macro itself, never a host SRAM buffer. `buffer_energy_pj`
+    is a separate, one-time (not per-layer) cost for staging `hw.sram_buffer_kb`
+    worth of weights into the on-chip SRAM buffer -- the same "filled once per
+    profile" granularity `simulate_noc_mapping`'s own `buffer_delay_ms` already
+    assumes for this same field, just for energy instead of latency. Zero if
+    `hw.sram_buffer_kb` is unset. `energy_pj` is their sum -- the one number
+    @evaluator's Pareto ranking and target-checking actually use.
+    `latency_ns` sums per-layer ADC/DAC conversion time, since a CIM
+    crossbar's row x col MAC itself completes in parallel per cycle (the
+    array-size term does not appear in the latency model, only in energy)."""
+    total_compute_energy_fj = 0.0
     total_latency_ns = 0.0
 
     for lc in layer_configs:
         adc_energy_fj = params.adc_ref_energy_fj * (2**hw.adc_bits) * hw.crossbar_cols
         dac_energy_fj = params.dac_ref_energy_fj * hw.dac_bits * hw.crossbar_rows
         crossbar_energy_fj = params.crossbar_ref_energy_fj * hw.crossbar_rows * hw.crossbar_cols * lc.weight_bits
-        total_energy_fj += adc_energy_fj + dac_energy_fj + crossbar_energy_fj
+        total_compute_energy_fj += adc_energy_fj + dac_energy_fj + crossbar_energy_fj
         total_latency_ns += hw.adc_bits * params.adc_cycle_time_ns + hw.dac_bits * params.dac_settle_time_ns
 
+    buffer_bits = (hw.sram_buffer_kb or 0.0) * 8 * 1024
+    buffer_energy_fj = params.sram_buffer_ref_energy_fj_per_bit * buffer_bits
+
+    compute_energy_pj = round(total_compute_energy_fj / 1000.0, 6)
+    buffer_energy_pj = round(buffer_energy_fj / 1000.0, 6)
+
     return {
-        "energy_pj": round(total_energy_fj / 1000.0, 6),
+        "compute_energy_pj": compute_energy_pj,
+        "buffer_energy_pj": buffer_energy_pj,
+        "energy_pj": round(compute_energy_pj + buffer_energy_pj, 6),
         "latency_ns": round(total_latency_ns, 6),
     }
