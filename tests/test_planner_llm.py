@@ -51,7 +51,12 @@ def test_planner_stores_search_output_in_planned_layer_configs_ignoring_llm_numb
     state = state_factory()
     stage_names = planner_module.real_stage_names(state["model_id"])
     stage_points, _ = planner_module._propose_stage_points(state, stage_names)
-    expected_layer_configs = planner_module.points_to_stage_configs(stage_points, stage_names)
+    # Same snapping context planner_node itself resolves -- without it this
+    # recomputation would expect the raw pruning clamp instead of the
+    # snapped value (tools/cim_physics.py's snap_pruning_ratio).
+    expected_layer_configs = planner_module.points_to_stage_configs(
+        stage_points, stage_names, *planner_module._snapping_context(state["model_id"], state["hw_spec_id"])
+    )
 
     update = planner_node(state)
 
@@ -85,7 +90,9 @@ def test_planner_falls_back_to_search_point_when_llm_call_raises(monkeypatch, st
     # search points, rather than a flat hardcoded default.
     stage_names = planner_module.real_stage_names(state["model_id"])
     stage_points, search_tag = planner_module._propose_stage_points(state, stage_names)
-    expected_layer_configs = planner_module.points_to_stage_configs(stage_points, stage_names)
+    expected_layer_configs = planner_module.points_to_stage_configs(
+        stage_points, stage_names, *planner_module._snapping_context(state["model_id"], state["hw_spec_id"])
+    )
 
     update = planner_node(state)
 
