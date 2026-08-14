@@ -23,7 +23,10 @@ def main() -> None:
     payload = json.load(sys.stdin)
     hw = HWConfig(**payload["hw_config"])
     layer_configs = [LayerBitConfig(**lc) for lc in payload["layer_configs"]]
-    result = simulate_precise_energy(hw, layer_configs)
+    shapes = payload.get("stage_weight_shapes")
+    if shapes:
+        shapes = {stage: [tuple(t) for t in triples] for stage, triples in shapes.items()}
+    result = simulate_precise_energy(hw, layer_configs, shapes)
     json.dump(result, sys.stdout)
 
 
