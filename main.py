@@ -39,7 +39,7 @@ from langgraph.types import Command, Interrupt
 from pydantic import ValidationError
 
 from graph import build_graph
-from nodes.planner import search_bounds
+from nodes.planner import SEARCH_STRATEGIES, search_bounds
 from middleware import register_hw_config
 from schemas.config import HWConfig, NoCTopology
 from state import AutoCIMState, merge_dicts
@@ -55,7 +55,7 @@ from tools.calibration import (
 )
 from tools.dashboard import render_dashboard_html
 from tools.qat import _resolve_device
-from tools.search import compute_pareto_rank
+from tools.search import best_known_candidate, compute_pareto_rank
 
 # Sample hardware spec, used when --hw-config isn't given. A real deployment
 # points --hw-config at a JSON file describing the target chip instead of
@@ -94,7 +94,50 @@ REPORT_DIR = Path(__file__).resolve().parent / "reports"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one AutoCIM-Agent optimization session.")
-    parser.add_argument("--model-id", default="resnet18", help="Target model identifier.")
+    parser.add_argument(
+        "--model-id",
+        default="resnet18",
+        help=(
+            "Target model identifier: one of the built-ins ('resnet18', 'mobilenet_v2', 'vit_tiny') "
+            "or a 'module.path:function_name' custom spec pointing at your own Callable[[num_classes], "
+            "nn.Module] (tools/qat.py's _resolve_model_builder) -- no code change to this repo needed."
+        ),
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help=(
+            "This session's run_seed (state.py) -- varies both which candidates the search proposes "
+            "(nodes/planner.py's search_seed_for: warm-up LHS points + NSGA-II acquisition) and QAT "
+            "training's own stochasticity (tools/qat.py's run_qat_tuning, via torch's RNG). Default 0 "
+            "matches every prior session's behavior. Vary this to get a genuinely independent replicate "
+            "of the same (--model-id, --hw-config) search -- see tools/repeat_search.py for running "
+            "several seeds at once and reporting variance across them."
+        ),
+    )
+    parser.add_argument(
+        "--search-strategy",
+        default="multi_objective",
+        choices=SEARCH_STRATEGIES,
+        help=(
+            "Acquisition rule nodes/planner.py uses after warm-up (tools/search.py): 'multi_objective' "
+            "(default -- real NSGA-II over accuracy/energy_pj/noc_latency_ms), 'single_objective' "
+            "(accuracy-only IDW-UCB, the acquisition this project actually shipped before the NSGA-II "
+            "rewrite), or 'random' (no surrogate at all). Normal sessions should leave this at the "
+            "default -- it exists for tools/run_ablation.py to compare strategies against each other."
+        ),
+    )
+    parser.add_argument(
+        "--dataset-id",
+        default=None,
+        help=(
+            "Target dataset identifier: omit for the built-in 'cifar10' default, or a "
+            "'module.path:function_name' custom spec pointing at your own zero-argument "
+            "Callable[[], (train_loader, val_loader, test_loader, num_classes)] "
+            "(tools/qat.py's _resolve_dataset_loader) -- e.g. your own ImageNet loader."
+        ),
+    )
     parser.add_argument(
         "--hw-config",
         default=None,
@@ -815,6 +858,9 @@ def build_initial_state(
     target_energy_pj: Optional[float] = None,
     target_latency_ms: Optional[float] = None,
     allow_approximate_calibration: bool = True,
+    dataset_id: Optional[str] = None,
+    run_seed: int = 0,
+    search_strategy: str = "multi_objective",
 ) -> AutoCIMState:
     if allow_approximate_calibration:
         # Default: nearest-KNOWN_REFERENCES fallback (tools/calibration.py)
@@ -851,7 +897,10 @@ def build_initial_state(
         "planned_layer_configs": [],
         "planner_flagged_anomaly": None,
         "model_id": model_id,
+        "dataset_id": dataset_id,
         "hw_spec_id": hw_config.hw_spec_id,
+        "run_seed": run_seed,
+        "search_strategy": search_strategy,
         "target_accuracy": target_accuracy,
         "target_energy_pj": target_energy_pj,
         "target_latency_ms": target_latency_ms,
@@ -859,6 +908,7 @@ def build_initial_state(
         "retry_count": 0,
         "is_converged": False,
         "needs_hitl": False,
+        "low_confidence_conclusion": False,
     }
 
 
@@ -1066,12 +1116,13 @@ def _prompt_manual_override(suggestion: Optional[Dict[str, Any]]) -> Any:
         return new_bounds
 
 
-def prompt_for_override(interrupt_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Blocks on researcher input and shapes it into the
-    `Command(resume={"new_bounds": ...})` contract `hitl_node` expects, or
-    returns None to stop the run instead (run_session's existing "None ->
-    write_dashboard + return" handling covers this the same as any other
-    stop path)."""
+def prompt_for_override(interrupt_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Blocks on researcher input and shapes it into either the
+    `Command(resume={"new_bounds": ...})` contract `hitl_node` expects for
+    a retry, or `{"conclude_with_best": True}` (choice [3]) so `hitl_node`
+    routes straight to `END` with the best-known candidate marked
+    low-confidence instead of leaving the session paused indefinitely.
+    Never returns a bare `None` -- always resumes one way or the other."""
     print("\n=== HITL interrupt: researcher review requested ===")
     print(f"reason         : {interrupt_payload.get('reason')}")
     print(f"iteration_count: {interrupt_payload.get('iteration_count')}")
@@ -1091,7 +1142,7 @@ def prompt_for_override(interrupt_payload: Dict[str, Any]) -> Optional[Dict[str,
     while True:
         print("\n  [1] 추천 값 사용" + ("" if suggestion is not None else " (추천값 없음)"))
         print("  [2] 직접 입력")
-        print("  [3] 지금까지 결과를 리포트에 기록 후 종료")
+        print("  [3] 지금까지의 최선 후보로 결론짓고 종료 (낮은 신뢰도로 표시)")
         choice = input("선택: ").strip()
 
         if choice == "1":
@@ -1105,7 +1156,12 @@ def prompt_for_override(interrupt_payload: Dict[str, Any]) -> Optional[Dict[str,
                 continue
             return {"new_bounds": result}
         if choice == "3":
-            return None
+            # candidate_history[-1] is whatever the last (likely failing)
+            # iteration was, not a real answer -- hitl_node picks the best
+            # of the whole history instead (tools.search.best_known_candidate)
+            # and marks low_confidence_conclusion so no downstream consumer
+            # mistakes this for a real target-meeting convergence.
+            return {"conclude_with_best": True}
         print("  잘못된 선택입니다 -- 1, 2, 3 중 하나를 입력해주세요.")
 
 
@@ -1191,6 +1247,11 @@ def _format_update(iteration: int, node_name: str, update: Dict[str, Any]) -> st
         status = "HITL" if update.get("needs_hitl") else "not converged, retrying"
         return f"{prefix} {status} (retry {update.get('retry_count')}) -- {failure.get('reason')}"
 
+    if node_name == "hitl_human_approval":
+        if update.get("low_confidence_conclusion"):
+            return f"{prefix} CONCLUDED (low confidence) -- best-known candidate selected, no target fully met"
+        return f"{prefix} resumed with new search bounds: {update.get('human_overrides') or '(none)'}"
+
     if node_name == "precision_verifier":
         # Same is_converged/needs_hitl/retry_count/failure_history shape as
         # @evaluator's own update (nodes/precision_verifier.py reuses
@@ -1239,14 +1300,24 @@ def get_pending_interrupt(graph, config: Dict[str, Any]) -> Optional[Dict[str, A
 
 
 def print_final_state(state: Dict[str, Any]) -> None:
-    print(f"is_converged   : {state.get('is_converged')}")
-    print(f"iteration_count: {state.get('iteration_count')}")
-    history = state.get("candidate_history") or []
-    if history:
-        latest = history[-1]
+    low_confidence = bool(state.get("low_confidence_conclusion"))
+    real_converged = bool(state.get("is_converged")) and not low_confidence
+    print(f"is_converged   : {real_converged}")
+    if low_confidence:
         print(
-            f"latest candidate: accuracy={latest.get('accuracy')} energy_pj={latest.get('energy_pj')} "
-            f"noc_latency_ms={latest.get('noc_latency_ms')} pareto_rank={latest.get('pareto_rank')}"
+            "                 (search gave up without meeting every target -- the candidate below is just "
+            "the best one tried, not a real convergence; review before trusting)"
+        )
+    print(f"iteration_count: {state.get('iteration_count')}")
+    # candidate_history[-1] is only the trustworthy answer when this session
+    # really converged -- see tools.search.best_known_candidate's docstring
+    # for why low_confidence_conclusion must never be folded into that check.
+    best = best_known_candidate(state.get("candidate_history") or [], real_converged)
+    if best:
+        print(
+            f"{'selected' if low_confidence else 'latest'} candidate: accuracy={best.get('accuracy')} "
+            f"energy_pj={best.get('energy_pj')} noc_latency_ms={best.get('noc_latency_ms')} "
+            f"pareto_rank={best.get('pareto_rank')}"
         )
     print("(full detail: --dashboard-out report, or candidate_history/llm_usage in the checkpoint DB)")
 
@@ -1403,6 +1474,9 @@ def run_session(
     allow_approximate_calibration: bool = True,
     auto_hitl: bool = False,
     auto_hitl_max_rounds: int = 2,
+    dataset_id: Optional[str] = None,
+    run_seed: int = 0,
+    search_strategy: str = "multi_objective",
 ) -> None:
     register_hw_config(hw_config)
     graph = build_graph(checkpointer=checkpointer)
@@ -1424,14 +1498,17 @@ def run_session(
     auto_hitl_rounds_used = 0
 
     def resolve_override(interrupt_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """None means "stop the run instead" -- either the researcher chose
-        [3] 지금까지 결과를 리포트에 기록 후 종료 in prompt_for_override, or
-        --auto-hitl declined to guess (auto_resolve_override) / its round
-        cap is spent."""
+        """Never returns a bare `None` (see prompt_for_override's docstring)
+        -- every path either retries with new bounds or resumes with
+        `{"conclude_with_best": True}` so hitl_node can route to `END` with
+        a low-confidence best-known candidate instead of leaving the
+        session paused indefinitely with no real path to a final state.
+        Only `None` here is the pre-existing "resume-value error" case
+        below, not a normal outcome."""
         nonlocal dashboard_out
         if not auto_hitl:
             override = prompt_for_override(interrupt_payload)
-            if override is None and not dashboard_out:
+            if override.get("conclude_with_best") and not dashboard_out:
                 # [3] was chosen specifically to not lose this run's
                 # progress -- write a report even though none was ever
                 # requested, instead of silently doing nothing.
@@ -1444,18 +1521,19 @@ def run_session(
         nonlocal auto_hitl_rounds_used
         if auto_hitl_rounds_used >= auto_hitl_max_rounds:
             print(
-                f"\n[auto-hitl] round cap reached ({auto_hitl_max_rounds}); stopping instead of resolving "
-                f"further without researcher review. Resume with --thread-id {thread_id} (without --auto-hitl) "
-                "to take over manually."
+                f"\n[auto-hitl] round cap reached ({auto_hitl_max_rounds}); concluding with the best-known "
+                "candidate (low confidence) instead of resolving further without researcher review. Resume "
+                f"with --thread-id {thread_id} (without --auto-hitl) beforehand to take over manually instead."
             )
-            return None
+            return {"conclude_with_best": True}
         resolved = auto_resolve_override(interrupt_payload)
         if resolved is None:
             print(
                 "\n[auto-hitl] could not resolve this failure automatically (not a search-fixable target miss); "
-                f"stopping. Resume with --thread-id {thread_id} (without --auto-hitl) to review manually."
+                "concluding with the best-known candidate (low confidence). Resume with --thread-id "
+                f"{thread_id} (without --auto-hitl) beforehand to take over manually instead."
             )
-            return None
+            return {"conclude_with_best": True}
         auto_hitl_rounds_used += 1
         return resolved
 
@@ -1508,7 +1586,15 @@ def run_session(
             "AUTOCIM_QAT_TRAIN_SIZE=full and a larger AUTOCIM_QAT_TEST_SIZE widen the dataset for a more realistic number."
         )
         resumable_input = build_initial_state(
-            model_id, hw_config, target_accuracy, target_energy_pj, target_latency_ms, allow_approximate_calibration
+            model_id,
+            hw_config,
+            target_accuracy,
+            target_energy_pj,
+            target_latency_ms,
+            allow_approximate_calibration,
+            dataset_id=dataset_id,
+            run_seed=run_seed,
+            search_strategy=search_strategy,
         )
 
         # Cross-session learning (store.py): a hw_spec_id this project has
@@ -1586,6 +1672,8 @@ def run_session(
                     calibration_factors=resumable_input["calibration_factors"],
                     max_workers=effective_max_workers,
                     on_progress=_print_warmup_progress,
+                    dataset_id=dataset_id,
+                    run_seed=run_seed,
                 )
             except KeyboardInterrupt:
                 # Nothing persisted yet at this point (warm-up runs before
@@ -1753,6 +1841,9 @@ def main() -> None:
             ),
             auto_hitl=args.auto_hitl,
             auto_hitl_max_rounds=args.auto_hitl_max_rounds,
+            dataset_id=args.dataset_id,
+            run_seed=args.seed,
+            search_strategy=args.search_strategy,
         )
 
 
