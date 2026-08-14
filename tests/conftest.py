@@ -63,7 +63,10 @@ def make_state(**overrides: Any) -> AutoCIMState:
         "planned_layer_configs": [],
         "planner_flagged_anomaly": None,
         "model_id": "resnet18",
+        "dataset_id": None,
         "hw_spec_id": GOOD_HW_SPEC_ID,
+        "run_seed": 0,
+        "search_strategy": "multi_objective",
         "target_accuracy": None,
         "target_energy_pj": None,
         "target_latency_ms": None,
@@ -83,7 +86,7 @@ def state_factory() -> Callable[..., AutoCIMState]:
 
 @pytest.fixture
 def good_hw_config() -> HWConfig:
-    """Converges immediately under verifier_tool's mock IR-drop/noise check
+    """Converges immediately under verifier_tool's IR-drop/noise check
     (small wire resistance -> low ir_drop_error_pct)."""
     return HWConfig(
         hw_spec_id=GOOD_HW_SPEC_ID,
@@ -102,7 +105,7 @@ def good_hw_config() -> HWConfig:
 
 @pytest.fixture
 def bad_hw_config() -> HWConfig:
-    """Never converges under verifier_tool's mock IR-drop check
+    """Never converges under verifier_tool's IR-drop check
     (large wire resistance -> ir_drop_error_pct stays >= 5%)."""
     return HWConfig(
         hw_spec_id=BAD_HW_SPEC_ID,
@@ -249,7 +252,7 @@ def stub_tuner_qat_backend(monkeypatch: pytest.MonkeyPatch, fake_qat_backend: QA
     """Every test gets a stubbed @tuner QAT backend by default -- no test in
     this suite downloads CIFAR10/a pretrained checkpoint or spends real
     training time. Mirrors `stub_planner_llm` above."""
-    monkeypatch.setattr(simulators_module, "get_qat_backend", lambda model_id: fake_qat_backend)
+    monkeypatch.setattr(simulators_module, "get_qat_backend", lambda model_id, dataset_id=None: fake_qat_backend)
 
 
 @pytest.fixture(autouse=True)
