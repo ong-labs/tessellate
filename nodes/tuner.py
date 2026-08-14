@@ -12,9 +12,8 @@ from typing import Any, Dict
 from middleware import set_execution_context
 from nodes.common import build_execution_context, default_layer_configs
 from state import AutoCIMState
+from tools.qat import resolve_max_epochs
 from tools.simulators import tuner_tool
-
-_DEFAULT_MAX_EPOCHS = 5
 
 
 def tuner_node(state: AutoCIMState) -> Dict[str, Any]:
@@ -24,6 +23,6 @@ def tuner_node(state: AutoCIMState) -> Dict[str, Any]:
 
     result = tuner_tool(
         layer_configs=layer_configs,
-        max_epochs=_DEFAULT_MAX_EPOCHS,
+        max_epochs=resolve_max_epochs(),
     )
     return {"metrics_store": result}
