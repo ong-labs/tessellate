@@ -12,6 +12,19 @@ giving up after its round cap, rather than leaving the session paused
 forever with no real path to a final state). `graph.py`'s `hitl_router`
 reads `low_confidence_conclusion` to pick the edge.
 
+Both resume paths reset `retry_count`, not just the one carrying new
+bounds. `nodes/planner.py`'s own sanitization only fires when there *is* an
+override to consume (deliberately -- resetting it on every planner call
+would erase @evaluator's counter and loop forever), so resuming with empty
+`new_bounds` -- which `main.py`'s `_prompt_manual_override` explicitly
+offers as "빈칸=변경 없이 재시도" -- used to leave `retry_count` at
+MAX_RETRY_LIMIT: @evaluator then re-fired HITL on *every* following
+iteration instead of granting another full retry budget (reproduced: first
+pause at iteration 3, then a pause at 4, 5, 6, ...). Resetting here is safe
+in a way resetting in @planner is not: this node only runs when HITL
+actually fired, so the counter restarts once per researcher decision, never
+once per iteration.
+
 The conclude path deliberately does not *select* a candidate itself: it
 only records `low_confidence_conclusion=True`, and each reporting consumer
 (`main.py`'s `print_final_state`, `tools/dashboard.py`) applies
@@ -78,4 +91,8 @@ def hitl_node(state: AutoCIMState) -> Dict[str, Any]:
     return {
         "human_overrides": new_overrides,
         "needs_hitl": False,
+        # Reset regardless of whether `new_overrides` is empty -- see the
+        # module docstring: @planner's own sanitization can't cover the
+        # resume-unchanged case without looping forever.
+        "retry_count": 0,
     }
