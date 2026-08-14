@@ -24,6 +24,7 @@ from tools.qat import (
     _resolve_split_sizes,
     apply_crossbar_quant_prune,
     group_quantizable_layers,
+    resolve_max_epochs,
     run_qat_tuning,
 )
 
@@ -357,6 +358,42 @@ def test_run_qat_tuning_respects_max_epochs_cap(fake_qat_backend):
     assert result["epochs_run"] == 1
 
 
+# --- seed (reproducibility for multi-seed replicates, tools/repeat_search.py) -
+
+
+def test_run_qat_tuning_seed_resets_global_torch_rng(fake_qat_backend):
+    # Direct proof run_qat_tuning(seed=...) actually calls torch.manual_seed
+    # -- not "same result twice" against fake_qat_backend, which has no
+    # shuffling/dropout to be sensitive to a seed at all, so that would
+    # pass trivially even if seeding were a no-op. Calling with the same
+    # seed must reset torch's global RNG to the identical state each time,
+    # provably so via the *next* torch.rand() call matching across calls.
+    run_qat_tuning(fake_qat_backend, stage_configs={}, default_config=(4, 0.25), max_epochs=1, seed=123)
+    first = torch.rand(4)
+    run_qat_tuning(fake_qat_backend, stage_configs={}, default_config=(4, 0.25), max_epochs=1, seed=123)
+    second = torch.rand(4)
+    assert torch.equal(first, second)
+
+
+def test_run_qat_tuning_without_seed_does_not_touch_global_rng_determinism(fake_qat_backend):
+    # seed=None (the default) must be a true no-op on torch's global RNG --
+    # existing callers that never pass seed keep their prior (genuinely
+    # random) behavior unchanged.
+    torch.manual_seed(999)
+    run_qat_tuning(fake_qat_backend, stage_configs={}, default_config=(4, 0.25), max_epochs=1)
+    after_first = torch.rand(4)
+    torch.manual_seed(999)
+    run_qat_tuning(fake_qat_backend, stage_configs={}, default_config=(4, 0.25), max_epochs=1)
+    after_second = torch.rand(4)
+    # Both calls started from the identical manual_seed(999) checkpoint and
+    # neither call itself re-seeds -- so the *only* way these can still
+    # differ is if run_qat_tuning's own RNG consumption (shuffling/dropout,
+    # here effectively none) isn't itself perfectly deterministic. They
+    # should match -- this guards against seed=None accidentally calling
+    # torch.manual_seed(None), which would raise, not silently misbehave.
+    assert torch.equal(after_first, after_second)
+
+
 # --- Configurable QAT dataset scope (AUTOCIM_QAT_*) -------------------------
 
 
@@ -393,6 +430,21 @@ def test_resolve_int_env_returns_default_when_unset(monkeypatch):
 def test_resolve_int_env_parses_a_configured_value(monkeypatch):
     monkeypatch.setenv("AUTOCIM_QAT_BATCH_SIZE", "64")
     assert _resolve_int_env("AUTOCIM_QAT_BATCH_SIZE", 32) == 64
+
+
+def test_resolve_max_epochs_returns_default_when_unset(monkeypatch):
+    monkeypatch.delenv("AUTOCIM_QAT_MAX_EPOCHS", raising=False)
+    assert resolve_max_epochs() == 5
+
+
+def test_resolve_max_epochs_parses_a_configured_value(monkeypatch):
+    monkeypatch.setenv("AUTOCIM_QAT_MAX_EPOCHS", "15")
+    assert resolve_max_epochs() == 15
+
+
+def test_resolve_max_epochs_falls_back_to_default_on_garbage_value(monkeypatch):
+    monkeypatch.setenv("AUTOCIM_QAT_MAX_EPOCHS", "not-a-number")
+    assert resolve_max_epochs() == 5
 
 
 def test_resolve_split_sizes_passes_through_explicit_sizes_within_bounds():
