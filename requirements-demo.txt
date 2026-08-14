@@ -1,0 +1,6 @@
+# 발표 시연용 전용 의존성 -- 에이전트 실행에는 전혀 필요 없습니다.
+# notebooks/autocim_agent_demo.ipynb 를 열고 실행하기 위한 것뿐이라
+# requirements.txt(런타임 의존성, 엄격히 핀 고정)와 분리해 둡니다.
+#   pip install -r requirements-demo.txt
+-r requirements.txt
+jupyterlab==4.6.3
