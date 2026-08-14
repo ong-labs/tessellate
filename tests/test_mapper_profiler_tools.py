@@ -63,7 +63,15 @@ def test_profiler_calibration_factor_scales_energy_and_latency(state_factory, re
         calibration_factors={registered_hw_config.hw_spec_id: 2.0},
     )["profiler"]
 
-    assert calibrated["data"]["energy_pj"] == round(uncalibrated["data"]["energy_pj"] * 2, 6)
+    # Only compute_energy_pj (crossbar/ADC/DAC) is scaled by the calibration
+    # factor -- buffer_energy_pj (SRAM buffer staging) isn't derived from any
+    # calibration reference (tools/calibration.py's compute_calibration_factor)
+    # and stays flat; energy_pj is their sum.
+    assert calibrated["data"]["compute_energy_pj"] == round(uncalibrated["data"]["compute_energy_pj"] * 2, 6)
+    assert calibrated["data"]["buffer_energy_pj"] == uncalibrated["data"]["buffer_energy_pj"]
+    assert calibrated["data"]["energy_pj"] == round(
+        calibrated["data"]["compute_energy_pj"] + calibrated["data"]["buffer_energy_pj"], 6
+    )
     assert calibrated["data"]["latency_ns"] == round(uncalibrated["data"]["latency_ns"] * 2, 6)
 
 
@@ -100,4 +108,8 @@ def test_profiler_node_uses_pre_seeded_calibration_factor_from_state(state_facto
     calibrated = profiler_node(state)["metrics_store"]["profiler"]["data"]
     uncalibrated = profiler_node(baseline_state)["metrics_store"]["profiler"]["data"]
 
-    assert calibrated["energy_pj"] == round(uncalibrated["energy_pj"] * 5.0, 6)
+    # Same reasoning as test_profiler_calibration_factor_scales_energy_and_latency:
+    # only compute_energy_pj is scaled, buffer_energy_pj stays flat.
+    assert calibrated["compute_energy_pj"] == round(uncalibrated["compute_energy_pj"] * 5.0, 6)
+    assert calibrated["buffer_energy_pj"] == uncalibrated["buffer_energy_pj"]
+    assert calibrated["energy_pj"] == round(calibrated["compute_energy_pj"] + calibrated["buffer_energy_pj"], 6)
