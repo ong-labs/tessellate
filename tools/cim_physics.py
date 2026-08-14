@@ -66,6 +66,24 @@ class CIMTechParams:
 CIM_TECH_PARAMS = CIMTechParams()
 
 
+# Bump whenever this module's energy/latency numbers change *meaning* -- not
+# for a refactor, but whenever a value computed by the old code would be
+# wrong to compare against one computed by the new code.
+#
+# `store.py` keys its energy-derived long-term memory (calibration factors,
+# stored Pareto candidates) on this, so bumping it makes every pre-existing
+# entry invisible instead of silently mixing incompatible scales into a new
+# run. That is not hypothetical: version 1 charged one crossbar array per
+# layer_configs entry, version 2 charges the real per-layer pass count, so a
+# v1 candidate's energy_pj is ~70x smaller than a v2 candidate's for the
+# identical design. A real session loaded five such v1 candidates from a
+# previous run and plotted them in the same table as v2 numbers.
+#
+# 1: one array per layer_configs entry (pre-2026-08-14)
+# 2: real per-layer crossbar pass counts, pruning reduces mapped columns
+ENERGY_MODEL_VERSION = 2
+
+
 # ---------------------------------------------------------------------------
 # NoC topology: real hop-count graph distance formulas
 # ---------------------------------------------------------------------------
