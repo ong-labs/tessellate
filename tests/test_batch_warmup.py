@@ -14,6 +14,7 @@ from nodes.planner import real_stage_names, warmup_count
 from schemas.tools import LayerBitConfig
 from tools.batch_warmup import run_parallel_warmup
 from tools.cim_physics import simulate_cim_profile
+from tools.qat import get_stage_weight_shapes
 from tools.search import compute_pareto_rank
 
 
@@ -81,9 +82,14 @@ def test_run_parallel_warmup_honors_calibration_factors(good_hw_config):
     # buffer_energy_pj by it -- see that function's docstring), so the
     # expected total is recomputed directly rather than assumed to be a
     # flat *2.0 of the whole energy_pj.
+    # Real per-stage shapes, exactly as profiler_tool resolves them -- without
+    # these, simulate_cim_profile falls back to one array per entry and this
+    # recomputation would compare against a ~70x-smaller number than the tool
+    # actually produced (tools/cim_physics.py's crossbar_passes).
+    stage_weight_shapes = get_stage_weight_shapes("resnet18")
     for u, c in zip(sorted(uncalibrated, key=lambda e: e["iteration"]), sorted(calibrated, key=lambda e: e["iteration"])):
         layer_configs = [LayerBitConfig(**lc) for lc in u["layer_configs"]]
-        profile = simulate_cim_profile(good_hw_config, layer_configs)
+        profile = simulate_cim_profile(good_hw_config, layer_configs, stage_weight_shapes=stage_weight_shapes)
         expected = round(profile["compute_energy_pj"] * 2.0 + profile["buffer_energy_pj"], 6)
         assert c["energy_pj"] == expected
 
