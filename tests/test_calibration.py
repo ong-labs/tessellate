@@ -646,3 +646,43 @@ def test_bootstrap_approximate_calibration_provenance_matches_factors_keys():
     assert set(bootstrap_approximate_calibration_provenance(hw).keys()) == set(
         bootstrap_approximate_calibration_factors(hw).keys()
     )
+
+
+def test_reference_distance_is_zero_only_for_an_exact_array_shape_match():
+    """Regression: `_reference_distance` compared only the array's total
+    cell count, so a differently-shaped array with the same product came
+    out at distance 0.0 -- breaking this function's own stated "zero iff
+    exact match" invariant. Found on a real run: `cim_v1_128x128`
+    (128x128, 8-bit ADC) reported `approximate ... distance=0.0` against
+    the 256x64/8-bit Correll reference, which reads as an exact match while
+    converting half as many columns per pass.
+    """
+    from tools.calibration import _reference_distance
+
+    hw = _hw()  # 128x128, 7-bit ADC -- _REFERENCE's own shape
+    same_area_different_shape = CalibrationReference(
+        crossbar_rows=hw.crossbar_rows * 2,
+        crossbar_cols=hw.crossbar_cols // 2,  # identical rows*cols product
+        adc_bits=hw.adc_bits,
+        weight_bits=_REFERENCE.weight_bits,
+        reference_energy_pj_per_mac=_REFERENCE.reference_energy_pj_per_mac,
+        source=_REFERENCE.source,
+        note=_REFERENCE.note,
+    )
+
+    assert _reference_distance(hw, _REFERENCE) == 0.0
+    assert _reference_distance(hw, same_area_different_shape) > 0.0
+
+
+def test_nearest_reference_prefers_the_same_array_shape_over_equal_cell_count():
+    """The end-to-end consequence of the fix, on the hw_config this project
+    actually demos with: 128x128/8-bit must resolve to the 128x128/7-bit
+    NeuroSim reference (exact shape, one ADC bit away) rather than the
+    256x64/8-bit one (exact ADC, 4x aspect-ratio mismatch)."""
+    hw = _hw(adc_bits=8)  # no exact match: no 128x128/8-bit reference exists
+    assert find_matching_reference(hw) is None
+
+    nearest, distance = find_nearest_reference(hw)
+
+    assert (nearest.crossbar_rows, nearest.crossbar_cols) == (hw.crossbar_rows, hw.crossbar_cols)
+    assert distance == 1.0  # exactly the one-bit ADC gap, nothing else
