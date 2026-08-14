@@ -15,6 +15,7 @@ import nodes.planner as planner_module
 from nodes.planner import _SYSTEM_PROMPT, _TOOL_NAME, planner_node
 from nodes.tuner import tuner_node
 from schemas.planner import PlannerLayerDecision
+from tests.conftest import FakeToolCallingChatModel
 
 
 def test_system_prompt_forbids_the_llm_from_proposing_its_own_numbers():
@@ -92,6 +93,73 @@ def test_planner_falls_back_to_search_point_when_llm_call_raises(monkeypatch, st
     assert {lc["layer_name"] for lc in update["planned_layer_configs"]} == {"conv", "fc"}
     assert any("LLM proposal failed" in m["content"] for m in update["messages"])
     assert any(search_tag in m["content"] for m in update["messages"])
+
+
+def test_planner_switches_to_fallback_provider_when_primary_keeps_failing(monkeypatch, state_factory):
+    """The primary provider staying down through every retry must not
+    immediately fall back to the template rationale (module docstring's
+    "LLM 계층이 자동화의 장애물이 되지 않게" concern) when a distinct fallback
+    provider is configured and available -- it should switch and still
+    produce a real LLM-explained rationale."""
+
+    class _AlwaysRateLimited:
+        def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+            return self
+
+        def invoke(self, messages):
+            raise RuntimeError("429 rate limit exceeded")
+
+    fallback = FakeToolCallingChatModel(
+        {"rationale": "fallback provider decision", "rationale_ko": "폴백 provider 결정", "anomaly_note": None}
+    )
+
+    monkeypatch.setenv("AUTOCIM_LLM_MAX_RETRIES", "2")
+    monkeypatch.setenv("AUTOCIM_LLM_BASE_DELAY_SECONDS", "0.001")
+    monkeypatch.setenv("AUTOCIM_LLM_MAX_DELAY_SECONDS", "0.001")
+    monkeypatch.setattr(planner_module, "get_planner_chat_model", lambda: _AlwaysRateLimited())
+    monkeypatch.setattr(planner_module, "get_fallback_chat_model", lambda: fallback)
+
+    state = state_factory()
+    update = planner_node(state)
+
+    assert fallback.invoke_calls  # the fallback provider was actually called
+    entry = update["llm_usage"][0]
+    assert entry["succeeded"] is True
+    assert entry["provider_fallback_from"] is not None
+    assert "429" in entry["provider_fallback_from"]
+    assert update["planner_decisions"][0]["used_llm"] is True
+    assert update["planner_decisions"][0]["rationale"] == "fallback provider decision"
+
+
+def test_planner_falls_back_to_search_point_when_both_providers_fail(monkeypatch, state_factory, registered_hw_config):
+    class _AlwaysRateLimited:
+        def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+            return self
+
+        def invoke(self, messages):
+            raise RuntimeError("429 rate limit exceeded")
+
+    class _AlwaysConnectionRefused:
+        def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+            return self
+
+        def invoke(self, messages):
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setenv("AUTOCIM_LLM_MAX_RETRIES", "1")
+    monkeypatch.setenv("AUTOCIM_LLM_BASE_DELAY_SECONDS", "0.001")
+    monkeypatch.setenv("AUTOCIM_LLM_MAX_DELAY_SECONDS", "0.001")
+    monkeypatch.setattr(planner_module, "get_planner_chat_model", lambda: _AlwaysRateLimited())
+    monkeypatch.setattr(planner_module, "get_fallback_chat_model", lambda: _AlwaysConnectionRefused())
+
+    state = state_factory(hw_spec_id=registered_hw_config.hw_spec_id)
+    update = planner_node(state)
+
+    assert update["planned_layer_configs"]  # still a valid config, from the search
+    assert update["llm_usage"][0]["succeeded"] is False
+    assert "429" in update["llm_usage"][0]["error"]
+    assert "connection refused" in update["llm_usage"][0]["error"]
+    assert any("LLM proposal failed" in m["content"] for m in update["messages"])
 
 
 def test_planner_records_llm_usage_on_success(state_factory):
