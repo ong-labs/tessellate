@@ -87,6 +87,27 @@ def test_dynamic_interrupt_pauses_at_hitl_and_resumes_with_command(state_factory
     assert any("__interrupt__" in chunk for chunk in resumed_chunks)
 
 
+def test_conclude_with_best_resume_routes_straight_to_end(state_factory, registered_bad_hw_config):
+    """main.py's auto-hitl giving up after its round cap (or prompt_for_override's
+    choice [3]) resumes with {"conclude_with_best": True} -- hitl_node must
+    set is_converged/low_confidence_conclusion and graph.py's hitl_router
+    must route straight to END, never back to planner (which would just
+    retry against the same never-converging HW spec forever)."""
+    compiled = build_graph()
+    config = {"configurable": {"thread_id": "test-conclude-thread"}}
+    init_state = state_factory(hw_spec_id=registered_bad_hw_config.hw_spec_id)
+
+    first = compiled.invoke(init_state, config=config)
+    assert "__interrupt__" in first  # same first pause as the always-fails case above
+
+    result = compiled.invoke(Command(resume={"conclude_with_best": True}), config=config)
+
+    assert "__interrupt__" not in result, "conclude_with_best must reach END, not loop back through planner"
+    assert result["is_converged"] is True
+    assert result["low_confidence_conclusion"] is True
+    assert result["needs_hitl"] is False
+
+
 def test_good_hw_config_converges_without_ever_interrupting(state_factory, registered_hw_config):
     """Control case: a converging HWConfig must reach END without ever
     pausing, proving interrupts are conditional (needs_hitl-driven), not
