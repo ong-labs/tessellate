@@ -1,7 +1,7 @@
 """Tool input/output validation schemas for AutoCIM-Agent.
 
-Every backend tool (@tuner, @mapper, @profiler, @verifier, @search_paper)
-is validated through `wrap_tool_call` using the models below. Inputs carry
+Every backend tool (@tuner, @mapper, @profiler, @verifier) is validated
+through `wrap_tool_call` using the models below. Inputs carry
 an `ExecutionContext` + `HWConfig` pair instead of hardcoded model/hardware
 values, and outputs share a common envelope so they merge cleanly into
 `AutoCIMState.metrics_store` (see docs/coding_guidelines.md 5.A/5.C).
@@ -154,22 +154,3 @@ class PrecisionCheckToolOutput(ToolResult):
             "'is_converged': bool, 'target_errors': list[str]}"
         ),
     )
-
-
-# --- @search_paper: external literature search tool -------------------------
-
-
-class SearchPaperToolInput(BaseModel):
-    execution_context: ExecutionContext
-    query: str = Field(..., min_length=1)
-    top_k: int = Field(default=5, gt=0, le=50)
-
-
-class SearchPaperResult(BaseModel):
-    title: str
-    url: Optional[str] = None
-    summary: Optional[str] = None
-
-
-class SearchPaperToolOutput(ToolResult):
-    data: Optional[Dict[str, List[SearchPaperResult]]] = None
