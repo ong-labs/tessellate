@@ -8,6 +8,14 @@ Research_Plan.md section 3 (short-term state + reducers live in state.py):
 - GlobalHWStore: per-hw_spec_id calibration factors and NoC/buffer delay
   rule-base, shared across all models run on that hardware.
 
+Entries whose value depends on the energy model (`calibration_factors`,
+`pareto_solutions`) are stored under a key suffixed with
+`tools.cim_physics.ENERGY_MODEL_VERSION` (`_versioned_key`). A physics
+change therefore makes older entries simply invisible rather than loading
+them into a run that computes energy differently -- see that constant's
+comment for the real incident this prevents. Entries that carry no energy
+number (`sensitivity_profile`, `noc_delay_rulebase`) keep their plain keys.
+
 `InMemoryLongTermStore` is a Mock-First (docs/coding_guidelines.md 5.D) backend for
 development; swap in a persistent/vector-backed `BaseLongTermStore`
 implementation later without changing `ModelSpecificStore`/`GlobalHWStore`
@@ -24,8 +32,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from state import merge_dicts
+from tools.cim_physics import ENERGY_MODEL_VERSION
 
 Namespace = Tuple[str, ...]
+
+
+def _versioned_key(key: str) -> str:
+    """Suffixes an energy-derived key with the current energy-model version,
+    so entries written under a different physics model are never read back
+    (module docstring / `tools.cim_physics.ENERGY_MODEL_VERSION`)."""
+    return f"{key}@v{ENERGY_MODEL_VERSION}"
 
 
 @dataclass
@@ -175,10 +191,10 @@ class ModelSpecificStore:
         self._backend.put(self._namespace(model_id), "sensitivity_profile", profile)
 
     def get_pareto_solutions(self, model_id: str) -> Optional[Dict[str, Any]]:
-        return self._backend.get(self._namespace(model_id), "pareto_solutions")
+        return self._backend.get(self._namespace(model_id), _versioned_key("pareto_solutions"))
 
     def put_pareto_solutions(self, model_id: str, solutions: Dict[str, Any]) -> None:
-        self._backend.put(self._namespace(model_id), "pareto_solutions", solutions)
+        self._backend.put(self._namespace(model_id), _versioned_key("pareto_solutions"), solutions)
 
     def search_similar_models(self, architecture_summary: str, limit: int = 5) -> List[SearchResult]:
         return self._backend.search(self.NAMESPACE_PREFIX, architecture_summary, limit=limit)
@@ -202,11 +218,13 @@ class GlobalHWStore:
         return (*self.NAMESPACE_PREFIX, hw_spec_id)
 
     def get_calibration_factors(self, hw_spec_id: str) -> Optional[Dict[str, float]]:
-        return self._backend.get(self._namespace(hw_spec_id), "calibration_factors")
+        return self._backend.get(self._namespace(hw_spec_id), _versioned_key("calibration_factors"))
 
     def put_calibration_factors(self, hw_spec_id: str, factors: Dict[str, float]) -> None:
         existing = self.get_calibration_factors(hw_spec_id) or {}
-        self._backend.put(self._namespace(hw_spec_id), "calibration_factors", merge_dicts(existing, factors))
+        self._backend.put(
+            self._namespace(hw_spec_id), _versioned_key("calibration_factors"), merge_dicts(existing, factors)
+        )
 
     def get_noc_delay_rulebase(self, hw_spec_id: str) -> Optional[Dict[str, Any]]:
         return self._backend.get(self._namespace(hw_spec_id), "noc_delay_rulebase")
