@@ -22,6 +22,8 @@ inside the Docker image."""
 import subprocess
 from unittest.mock import MagicMock
 
+import pytest
+
 from schemas.config import CIMDeviceType, HWConfig, NoCTopology
 from schemas.tools import LayerBitConfig
 from tools import precision_check
@@ -39,6 +41,12 @@ from tools.precision_check import (
 )
 
 _LAYER_CONFIGS = [LayerBitConfig(layer_name="conv", weight_bits=6, activation_bits=6, column_pruning_ratio=0.1)]
+
+
+def _layer(name="conv", weight_bits=6, pruning=0.0):
+    return LayerBitConfig(
+        layer_name=name, weight_bits=weight_bits, activation_bits=weight_bits, column_pruning_ratio=pruning
+    )
 
 
 def _hw(**overrides) -> HWConfig:
@@ -384,7 +392,9 @@ def test_docker_bridge_result_used_verbatim_when_it_succeeds(monkeypatch):
         "raw_compute_energy_pj": 1.0,
         "precise_compute_energy_pj": 999.0,
     }
-    monkeypatch.setattr(precision_check, "_call_docker_precision_bridge", lambda hw, lcs: bridged_result)
+    monkeypatch.setattr(
+        precision_check, "_call_docker_precision_bridge", lambda hw, lcs, shapes=None: bridged_result
+    )
 
     result = simulate_precise_energy(_hw(), _LAYER_CONFIGS)
 
@@ -516,3 +526,60 @@ def test_ensure_docker_container_running_recreates_a_stopped_container(monkeypat
 def test_ensure_docker_container_running_returns_false_when_docker_missing(monkeypatch):
     monkeypatch.setattr(subprocess, "run", MagicMock(side_effect=FileNotFoundError("docker not found")))
     assert precision_check._ensure_docker_container_running("autocim-agent", "my-container") is False
+
+
+# --- Stage-1 / Stage-2 pass-count consistency -------------------------------
+
+
+_SHAPES = {"layer4.1": [(4608, 512, 1), (4608, 512, 1)]}   # 288 passes at 128x128
+
+
+def test_precise_raw_energy_matches_stage_one_when_shapes_are_given():
+    """`raw_compute_energy_pj` must equal what @profiler's own
+    simulate_cim_profile computes for the same config.
+
+    Stage-2 used to charge one array per entry while Stage-1 had moved to
+    real per-layer crossbar pass counts, so a stage needing 288 arrays was
+    priced as 1 here. `precision_check_tool` feeds `precise_energy_pj`
+    straight into check_targets, so an energy target was being compared
+    against a number hundreds of times too small."""
+    layer_configs = [_layer(name="layer4.1")]
+
+    stage_one = simulate_cim_profile(_hw(), layer_configs, stage_weight_shapes=_SHAPES)
+    stage_two = simulate_precise_energy(_hw(), layer_configs, _SHAPES)
+
+    assert stage_two["raw_compute_energy_pj"] == stage_one["compute_energy_pj"]
+    assert stage_two["raw_energy_pj"] == stage_one["energy_pj"]
+
+
+def test_precise_energy_scales_with_real_pass_counts():
+    """Shape-aware Stage-2 must charge this stage its 288 real passes, so
+    it lands far above the shape-blind one-array-per-entry result."""
+    layer_configs = [_layer(name="layer4.1")]
+
+    blind = simulate_precise_energy(_hw(), layer_configs)
+    shaped = simulate_precise_energy(_hw(), layer_configs, _SHAPES)
+
+    assert shaped["raw_compute_energy_pj"] == pytest.approx(blind["raw_compute_energy_pj"] * 288)
+    assert shaped["precise_compute_energy_pj"] > blind["precise_compute_energy_pj"]
+
+
+def test_calibration_factor_is_near_one_when_both_stages_agree():
+    """The calibration factor is multiplicity-invariant: it is a ratio, so
+    a uniform pass count cancels. Pinning this down matters because it says
+    the unit mismatch did NOT corrupt the factor -- the damage was to the
+    absolute energies (see the test above), not to the feedback loop."""
+    layer_configs = [_layer(name="layer4.1")]
+
+    shaped = simulate_precise_energy(_hw(), layer_configs, _SHAPES)
+    blind = simulate_precise_energy(_hw(), layer_configs)
+
+    factor_shaped = compute_updated_calibration_factor(
+        shaped["raw_compute_energy_pj"], shaped["precise_compute_energy_pj"]
+    )
+    factor_blind = compute_updated_calibration_factor(
+        blind["raw_compute_energy_pj"], blind["precise_compute_energy_pj"]
+    )
+    # Same physical correction either way -- the multiplicity cancels in the
+    # ratio, which is exactly why a *mismatched* pair produced nonsense.
+    assert factor_shaped == pytest.approx(factor_blind, rel=1e-6)
