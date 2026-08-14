@@ -56,6 +56,26 @@ invented speculatively (Research_Plan.md's own evaluator_node sketch names
 "Target 지표 미달성" as a failure reason, implying an accuracy/energy/latency
 target was always part of the intended design, just never implemented).
 
+`run_seed` (default 0, set once at session start like `model_id`/`hw_spec_id`)
+lets one `(model_id, hw_spec_id)` combination be searched more than once as
+genuinely independent replicates -- `nodes/planner.py`'s `search_seed_for`
+and `tools/qat.py`'s `run_qat_tuning` both fold it in, so a different
+`run_seed` explores different warm-up/NSGA-II points and different QAT
+training stochasticity, not just a different label on the same run.
+`tools/repeat_search.py` is the intended caller for varying this across a
+batch of runs; a single normal session never needs to set it to anything
+but the default.
+
+`search_strategy` (default `"multi_objective"`, set once at session start
+like `run_seed`) selects which acquisition rule `nodes/planner.py`'s
+`_propose_stage_points` uses once past warm-up: `"multi_objective"` (this
+project's real NSGA-II acquisition, the normal/production choice),
+`"single_objective"` (accuracy-only IDW-UCB, the prior acquisition this
+project actually shipped before the NSGA-II rewrite), or `"random"` (no
+surrogate at all). Exists so `tools/run_ablation.py` can run the identical
+search loop against each strategy and compare real outcomes -- a normal
+session never needs to set this to anything but the default.
+
 `planner_flagged_anomaly` is @planner's LLM-set early-warning signal
 (schemas/planner.py's `PlannerLayerDecision.anomaly_note`) -- unlike
 `human_overrides`, this needs no explicit reset: @planner sets it fresh
@@ -114,7 +134,10 @@ class AutoCIMState(TypedDict):
     planned_layer_configs: List[Dict[str, Any]]
     planner_flagged_anomaly: Optional[str]
     model_id: str
+    dataset_id: Optional[str]
     hw_spec_id: str
+    run_seed: int
+    search_strategy: str
     target_accuracy: Optional[float]
     target_energy_pj: Optional[float]
     target_latency_ms: Optional[float]
@@ -122,3 +145,13 @@ class AutoCIMState(TypedDict):
     retry_count: int
     is_converged: bool
     needs_hitl: bool
+    # True only when `is_converged` was set by hitl_node's "conclude with
+    # best known candidate" path (main.py's auto-hitl giving up after its
+    # round cap), never by @evaluator/@precision_verifier's own real
+    # target-check pass -- distinguishes "this candidate actually met every
+    # configured target" from "the search gave up and this is just the best
+    # of what it tried," which callers (tools/search.py's
+    # best_known_candidate, tools/dashboard.py) must not conflate: the
+    # former's candidate_history[-1] is the trustworthy answer, the latter's
+    # is just whatever the last (likely failing) iteration happened to be.
+    low_confidence_conclusion: bool
