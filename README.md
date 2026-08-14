@@ -181,6 +181,8 @@ python main.py --model-id resnet18 --dashboard-out report.html
 
 Groq/Gemini를 쓰려면 `pip install -r requirements.txt`에 이미 포함된 `langchain-groq`/`langchain-google-genai`가 필요하고, 각각 `GROQ_API_KEY`/`GOOGLE_API_KEY` 환경변수를 설정하면 됩니다.
 
+> ⚠️ **`main.py`의 에너지 수치를 `tools/baseline_compare.py` 결과와 나란히 비교하려면 `.cache/long_term_store.sqlite`를 먼저 비우세요.** `main.py`는 교차 세션 학습(`store.py`)을 해서, 이전 세션이 저장한 보정계수와 Pareto 후보를 다음 세션이 이어받습니다. 그러면 (1) 문헌 부트스트랩(`tools/calibration.py`) 대신 **학습된 계수**로 시작하고, (2) 이어받은 후보가 있으면 **LHS 워밍업을 통째로 건너뜁니다**. 반면 `baseline_compare`/`optuna_compare`는 학습을 하지 않고 항상 문헌값을 씁니다 — 실제로 이 차이 때문에 같은 하드웨어·같은 모델인데 대시보드 에너지가 8배(414.37x vs 51.85x) 어긋난 적이 있습니다. 학습 자체는 의도된 기능이지만, **두 경로의 수치를 같은 표에 올릴 때는 기준을 맞춰야 합니다.**
+
 **`--hw-config`를 생략하고 터미널에서 직접 실행하면**, 매번 JSON 파일 경로를 손으로 쓰는 대신 대화형으로 물어봅니다: (1) 커스텀 값 직접 입력 (2) 저장된 예시 파일(`examples/hw_configs/`) 중 선택 (3) 기본값 사용. 직접 입력 시 각 필드에서 `b`(또는 `back`/`뒤로`)를 입력하면 바로 앞 필드로 돌아가 다시 입력할 수 있고(맨 첫 필드에서 입력하면 [1]/[2]/[3] 메뉴로 돌아감), 스키마 검증에 실패해도(예: `noc_topology`에 오타) 이미 입력한 다른 필드는 그대로 유지된 채 문제된 필드만 원래 기본값으로 재설정됩니다. 입력한 스펙이 `tools/calibration.py`의 레퍼런스와 정확히 일치하지 않으면, 그 자리에서 가장 가까운 레퍼런스로 근사 보정할지 물어보며 기본값은 "예"입니다(`--exact-calibration-only`로 전역 opt-out과 동일한 효과를 내려면 그 자리에서 "n"으로 답하면 됩니다). `--hw-config`를 명시하거나 스크립트/CI처럼 터미널이 아닌 환경에서 실행하면 이 프롬프트는 뜨지 않고 기존과 동일하게 동작합니다.
 
 > **GPU 환경 주의**: 워밍업은 항상 병렬로 실행되지만, 단일 CUDA GPU에서는 여러 스레드가 동시에 cudnn을 호출하면 메모리 경쟁을 넘어 크래시(`CUDA error: invalid resource handle` 등)가 날 수 있어서, `--parallel-warmup-workers`를 명시하지 않으면 CUDA에서는 자동으로 1개 워커(사실상 순차 실행)로 기본값이 설정됩니다. 여러 워커를 쓰려면 `--parallel-warmup-workers`를 직접 지정하세요(안정성은 직접 확인 필요). CPU/MPS에서는 기존처럼 `min(워밍업 후보 수, CPU 코어 수)`가 기본값입니다.
