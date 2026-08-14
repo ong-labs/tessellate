@@ -149,3 +149,23 @@ def test_run_parallel_warmup_is_actually_concurrent(good_hw_config, monkeypatch)
     run_parallel_warmup("resnet18", good_hw_config)
 
     assert captured["max_workers"] > 1
+
+
+def test_run_parallel_warmup_warns_that_multiple_workers_are_not_reproducible(good_hw_config, capsys):
+    """tools/qat.py's run_qat_tuning seeds torch's *global* RNG and the
+    train loader shuffles from it, so concurrent trials reseed it under
+    each other -- per-candidate accuracy then isn't reproducible from
+    (stage_configs, run_seed) alone. That has to be stated when it applies,
+    not left for someone to discover by getting two different numbers from
+    the same command."""
+    run_parallel_warmup("resnet18", good_hw_config, max_workers=2)
+
+    assert "재현되지 않습니다" in capsys.readouterr().out
+
+
+def test_run_parallel_warmup_stays_quiet_with_a_single_worker(good_hw_config, capsys):
+    """One worker (the default on a single CUDA device) has no such race --
+    warning there would be noise on the path that is actually safe."""
+    run_parallel_warmup("resnet18", good_hw_config, max_workers=1)
+
+    assert "재현되지 않습니다" not in capsys.readouterr().out
