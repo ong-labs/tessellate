@@ -10,8 +10,8 @@ real `candidate_history` (state.py, populated by @evaluator) exists -- one
 independent (weight_bits, column_pruning_ratio)
 pair *per real model stage* (`tools.qat.get_layer_groups`), not a single
 flat point fanned out via a fixed rule: the search space is genuinely
-`2 * len(stage_names)`-dimensional (12 for resnet18's 6 stages, up to 40 for
-mobilenet_v2's 20). `points_to_stage_configs` only rounds/clamps each
+`2 * len(stage_names)`-dimensional (20 for resnet18's 10 stages, up to 40
+for mobilenet_v2's 20). `points_to_stage_configs` only rounds/clamps each
 stage's searched point into a `LayerBitConfig` -- it introduces no bias of
 its own; whatever differences exist between stages come from the search
 itself finding them independently, not from a hardcoded edge-stage rule.
