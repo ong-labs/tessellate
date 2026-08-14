@@ -256,6 +256,22 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--ignore-learned-state",
+        action="store_true",
+        help=(
+            "Start from the literature calibration bootstrap and a cold "
+            "candidate_history, ignoring anything store.py learned in "
+            "previous sessions on this hw_spec_id/model_id. Use this "
+            "whenever a run's numbers have to line up with "
+            "tools/baseline_compare.py or tools/optuna_compare.py: those "
+            "never learn, so a session that inherits a learned calibration "
+            "factor reports energy on a different scale (measured: 414.37x "
+            "literature vs 51.85x learned, an 8x gap on identical hardware) "
+            "and skips LHS warm-up entirely when stored candidates seed its "
+            "history."
+        ),
+    )
+    parser.add_argument(
         "--exact-calibration-only",
         action="store_true",
         help=(
@@ -1477,6 +1493,7 @@ def run_session(
     dataset_id: Optional[str] = None,
     run_seed: int = 0,
     search_strategy: str = "multi_objective",
+    ignore_learned_state: bool = False,
 ) -> None:
     register_hw_config(hw_config)
     graph = build_graph(checkpointer=checkpointer)
@@ -1603,11 +1620,18 @@ def run_session(
         # model_id already optimized before seeds candidate_history with
         # its stored Pareto front instead of starting cold, so warm-up
         # needs fewer (or zero) new LHS samples before the surrogate phase.
-        learned_calibration = hw_store.get_calibration_factors(hw_config.hw_spec_id)
+        learned_calibration = None if ignore_learned_state else hw_store.get_calibration_factors(hw_config.hw_spec_id)
         if learned_calibration:
             resumable_input["calibration_factors"] = merge_dicts(resumable_input["calibration_factors"], learned_calibration)
             print(f"[long-term] 이전 실행에서 학습된 보정계수를 불러왔습니다: hw_spec_id={hw_config.hw_spec_id!r}")
-        learned_solutions = model_store.get_pareto_solutions(_pareto_store_key(model_id, hw_config.hw_spec_id))
+        learned_solutions = (
+            None if ignore_learned_state else model_store.get_pareto_solutions(_pareto_store_key(model_id, hw_config.hw_spec_id))
+        )
+        if ignore_learned_state:
+            print(
+                "[long-term] --ignore-learned-state: 이전 세션이 학습한 보정계수/Pareto 후보를 "
+                "무시하고 문헌 부트스트랩 + 콜드 스타트로 실행합니다."
+            )
         if learned_solutions and learned_solutions.get("candidates"):
             resumable_input["candidate_history"] = list(learned_solutions["candidates"])
             print(
@@ -1844,6 +1868,7 @@ def main() -> None:
             dataset_id=args.dataset_id,
             run_seed=args.seed,
             search_strategy=args.search_strategy,
+            ignore_learned_state=args.ignore_learned_state,
         )
 
 
