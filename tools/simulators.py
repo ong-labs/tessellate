@@ -24,6 +24,8 @@ over time.
 
 from __future__ import annotations
 
+from typing import Dict, List, Optional, Tuple
+
 from middleware import wrap_tool_call
 from schemas.tools import (
     MapperToolInput,
@@ -40,7 +42,7 @@ from schemas.tools import (
 )
 from tools.cim_physics import simulate_cim_profile, simulate_noc_mapping
 from tools.precision_check import compute_updated_calibration_factor, simulate_precise_energy
-from tools.qat import get_qat_backend, run_qat_tuning
+from tools.qat import get_qat_backend, get_stage_weight_shapes, run_qat_tuning
 from tools.targets import check_targets
 
 
@@ -93,15 +95,35 @@ def tuner_tool(args: TunerToolInput) -> TunerToolOutput:
     )
 
 
+def _stage_shapes_for(model_id: str) -> Optional[Dict[str, List[Tuple[int, int, int]]]]:
+    """Real per-stage weight-matrix shapes for `model_id`, or None if this
+    model's architecture can't be resolved.
+
+    None makes `tools.cim_physics` fall back to its old one-array-per-entry
+    assumption rather than fail the whole tool: a custom `--model-id` spec
+    that can't be imported is already reported by @tuner (which really does
+    need the model), so failing @mapper/@profiler on it too would turn one
+    clear error into three confusing ones. `get_stage_weight_shapes` reuses
+    the architecture instance `@tuner`/@planner already cached, so this
+    costs a dict walk, not a model build."""
+    try:
+        return get_stage_weight_shapes(model_id)
+    except Exception:  # noqa: BLE001 -- see docstring: degrade, don't cascade
+        return None
+
+
 @wrap_tool_call(MapperToolInput, node_name="mapper")
 def mapper_tool(args: MapperToolInput) -> MapperToolOutput:
-    """Real Multi-Tile / NoC mapping simulation (tools/cim_physics.py): one
-    crossbar tile per `args.layer_configs` entry, placed and pipelined per
+    """Real Multi-Tile / NoC mapping simulation (tools/cim_physics.py):
+    every layer's real weight-matrix shape is tiled across
+    `crossbar_rows x crossbar_cols` arrays, placed and pipelined per
     `args.hw_config.noc_topology`'s real hop-count formula, with
     bandwidth-limited transfer timing -- never a literal '128x128'/tile
     count or an arbitrary latency constant.
     """
-    mapping = simulate_noc_mapping(args.hw_config, args.layer_configs)
+    mapping = simulate_noc_mapping(
+        args.hw_config, args.layer_configs, stage_weight_shapes=_stage_shapes_for(args.execution_context.model_id)
+    )
     mapping["tiling_strategy"] = args.tiling_strategy or "default_row_major"
 
     return MapperToolOutput(status=ToolStatus.SUCCESS, data=mapping)
@@ -122,7 +144,9 @@ def profiler_tool(args: ProfilerToolInput) -> ProfilerToolOutput:
     calibration reference (see tools/calibration.py's compute_calibration_factor)
     and is added back in afterward, unscaled, to get the final `energy_pj`.
     """
-    profile = simulate_cim_profile(args.hw_config, args.layer_configs)
+    profile = simulate_cim_profile(
+        args.hw_config, args.layer_configs, stage_weight_shapes=_stage_shapes_for(args.execution_context.model_id)
+    )
 
     calibration_factors = dict(args.calibration_factors or {})
     factor = calibration_factors.setdefault(args.hw_config.hw_spec_id, 1.0)
