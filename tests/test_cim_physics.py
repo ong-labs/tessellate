@@ -92,5 +92,32 @@ def test_more_layers_increase_both_energy_and_latency(good_hw_config):
     one_layer = simulate_cim_profile(good_hw_config, [_layer()])
     two_layers = simulate_cim_profile(good_hw_config, [_layer(), _layer()])
 
-    assert two_layers["energy_pj"] == round(one_layer["energy_pj"] * 2, 6)
+    # compute_energy_pj (ADC+DAC+crossbar) scales with layer count; buffer_energy_pj
+    # is a one-time buffer-fill cost (simulate_cim_profile's own docstring) and must
+    # NOT double just because the run has more layers.
+    assert two_layers["compute_energy_pj"] == round(one_layer["compute_energy_pj"] * 2, 6)
+    assert two_layers["buffer_energy_pj"] == one_layer["buffer_energy_pj"]
+    assert two_layers["energy_pj"] == round(two_layers["compute_energy_pj"] + two_layers["buffer_energy_pj"], 6)
     assert two_layers["latency_ns"] == round(one_layer["latency_ns"] * 2, 6)
+
+
+def test_buffer_energy_is_zero_when_sram_buffer_kb_unset(good_hw_config):
+    hw = good_hw_config.model_copy(update={"sram_buffer_kb": None})
+    result = simulate_cim_profile(hw, [_layer()])
+
+    assert result["buffer_energy_pj"] == 0.0
+    assert result["energy_pj"] == result["compute_energy_pj"]
+
+
+def test_buffer_energy_scales_linearly_with_sram_buffer_kb(good_hw_config):
+    small = good_hw_config.model_copy(update={"sram_buffer_kb": 32.0})
+    large = good_hw_config.model_copy(update={"sram_buffer_kb": 64.0})
+
+    small_result = simulate_cim_profile(small, [_layer()])
+    large_result = simulate_cim_profile(large, [_layer()])
+
+    assert large_result["buffer_energy_pj"] == round(small_result["buffer_energy_pj"] * 2, 6)
+    # compute_energy_pj must be unaffected by sram_buffer_kb -- it's a
+    # crossbar/ADC/DAC-only quantity (tools/calibration.py calibrates
+    # against it specifically because it excludes buffer energy).
+    assert small_result["compute_energy_pj"] == large_result["compute_energy_pj"]
