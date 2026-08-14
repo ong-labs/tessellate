@@ -12,7 +12,10 @@ predicted energy for the matching config) and seeds
 `AutoCIMState.calibration_factors` with it (main.py) so @profiler's output
 is corrected against real data from the first iteration, for any HWConfig
 whose (crossbar_rows, crossbar_cols, adc_bits) exactly matches a known
-reference.
+reference -- and, for the rare case where two references share that same
+triple (a real collision: the FeFET and Dong/Sinangil SRAM entries both
+sit at (64, 64, 4-bit-ADC)), whose `device_type` (`schemas.config.
+CIMDeviceType`) also picks out exactly one of them (`find_matching_reference`).
 
 `bootstrap_calibration_factors`/`bootstrap_calibration_provenance` (main.py's
 default path) are deliberately exact-match only -- no interpolation/
@@ -43,7 +46,7 @@ import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from schemas.calibration import CalibrationReference
-from schemas.config import HWConfig
+from schemas.config import CIMDeviceType, HWConfig
 from schemas.tools import LayerBitConfig
 from tools.cim_physics import simulate_cim_profile
 
@@ -56,6 +59,7 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
         crossbar_cols=128,
         adc_bits=7,
         weight_bits=8,
+        device_type=CIMDeviceType.RRAM,
         # NeuroSim V1.5's default configuration (128x128 array, 7-bit ADC,
         # 8b weight / 8b input, 22nm RRAM, ResNet-18/CIFAR-100) reports
         # 11.6 TOPS at 21.3 TOPS/W. 21.3 TOPS/W = 21.3e12 ops/J ->
@@ -80,6 +84,7 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
         crossbar_cols=64,
         adc_bits=8,
         weight_bits=3,
+        device_type=CIMDeviceType.RRAM,
         # Correll et al. 2025 (JSSC): silicon-measured (65nm, foundry MLC
         # ReRAM), not simulated. "Measured raw peak efficiency" at full
         # 256x64 array utilization is 20.7 TOPS/W (Sec. V.G / Table VII) --
@@ -116,6 +121,16 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
         crossbar_cols=32,
         adc_bits=5,
         weight_bits=4,
+        # device_type intentionally None: DARAM stores weights as an analog
+        # voltage on a capacitor node (dynamic, refreshed like DRAM), not a
+        # resistive-switching memristor -- a genuinely different device
+        # physics from CIMDeviceType.RRAM despite this project's own older
+        # examples/hw_configs/calibrated_daram_2021_reram_64x32.json naming
+        # it "reram" (a pre-existing, imprecise label from before device_type
+        # existed; that file's device_type field was left unset when this
+        # field was added, same honest-gap treatment as the FeFET reference
+        # below -- hwcomponents_neurosim ships no generic capacitive-analog
+        # cell either).
         # Chen, Chen & Gu 2021 (ISSCC 15.3): silicon-measured, 65nm 3T
         # dynamic-analog-RAM (DARAM) CIM macro, a genuine 5-bit SAR ADC (not
         # a custom VSA/CSA scheme like the ISSCC digest papers this project
@@ -155,6 +170,7 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
         crossbar_cols=128,
         adc_bits=1,
         weight_bits=1,
+        device_type=CIMDeviceType.SRAM,
         # Yu, Yoo, Kim, Chai & Kim 2020 (CICC): silicon-measured, 65nm 8T
         # SRAM CIM macro with a genuine reconfigurable column ADC (1-31
         # sense cycles for N=1..5 bits), binary (-1/+1) weight. Unlike every
@@ -190,6 +206,7 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
         crossbar_cols=128,
         adc_bits=5,
         weight_bits=1,
+        device_type=CIMDeviceType.SRAM,
         # Same macro/paper as the adc_bits=1 entry above, reconfigured to
         # its 5-bit column-ADC mode: "energy efficiency of the 1bit
         # operation is 490-to-15.8TOPS/W at 1-5bit ADC mode" (abstract) --
@@ -218,32 +235,40 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
         crossbar_cols=64,
         adc_bits=4,
         weight_bits=1,
+        # device_type intentionally None: FeFET is a real, distinct device
+        # technology (see below) but not one of CIMDeviceType's four --
+        # hwcomponents_neurosim ships no FeFET cell config, so there's
+        # nothing accurate to map it to (same honest-gap treatment as the
+        # DARAM reference above).
         # Garg, Jia, Phadke & Yu 2026 (IEEE Solid-State Circuits Letters):
         # silicon-measured, 28nm GlobalFoundries HKMG, a genuine FeFET
         # (ferroelectric FET) crossbar -- the first non-RRAM/SRAM/MRAM
         # device technology in this list (every reference above is RRAM,
         # SRAM, or a DARAM/MRAM variant). "Eight 4-bit Flash ADCs" (explicit
         # in the abstract) matches this codebase's flash-ADC energy
-        # assumption directly, same as the Dong/Sinangil reference this one
-        # replaces below. "Energy efficiency of 346.6 TOPS/W for 1x1b MAC"
-        # is this work's reported figure at its native 1-bit weight/1-bit
-        # input operating point; as with the NeuroSim/DARAM/MRAM references
-        # above, the paper does not state whether its TOPS convention counts
-        # 1 MAC as 1 or 2 ops -- assumed 1 MAC == 1 op here, consistent with
-        # this project's practice of stating that assumption rather than
-        # silently absorbing it. 1/346.6e12 J/MAC ~= 0.00289 pJ/MAC.
+        # assumption directly, same as the Dong/Sinangil reference below.
+        # "Energy efficiency of 346.6 TOPS/W for 1x1b MAC" is this work's
+        # reported figure at its native 1-bit weight/1-bit input operating
+        # point; as with the NeuroSim/DARAM/MRAM references above, the paper
+        # does not state whether its TOPS convention counts 1 MAC as 1 or 2
+        # ops -- assumed 1 MAC == 1 op here, consistent with this project's
+        # practice of stating that assumption rather than silently absorbing
+        # it. 1/346.6e12 J/MAC ~= 0.00289 pJ/MAC.
         #
         # This entry occupies the same (64, 64, 4-bit-ADC) key as the
-        # Dong/Sinangil 2020 SRAM reference that used to be here --
-        # find_matching_reference() only keys on (crossbar_rows,
-        # crossbar_cols, adc_bits), which has no field for device
-        # technology or weight_bits (HWConfig itself doesn't model either),
-        # so the two references could not coexist without a schema change.
-        # Replaced deliberately: this project's KNOWN_REFERENCES had zero
-        # FeFET data points despite RRAM/SRAM/MRAM/DARAM all being
-        # represented, so the device-technology diversity gained here was
-        # judged more valuable than keeping the 7nm SRAM data point. See
-        # git history for the displaced Dong/Sinangil entry's full citation.
+        # Dong/Sinangil 2020 SRAM reference below (originally added here,
+        # then removed when this FeFET entry was first added -- see git
+        # history -- then restored once find_matching_reference() gained
+        # device_type disambiguation; see that entry's own comment for the
+        # full history). Consequence for *this* entry: since FeFET has no
+        # representable device_type, it can no longer be reached by exact
+        # match now that a device_type=SRAM entry shares its key -- a query
+        # HWConfig with device_type unset is honestly ambiguous between the
+        # two (find_matching_reference returns None) rather than silently
+        # resolving to this entry the way it used to before either
+        # device_type or the Dong/Sinangil entry existed. This reference's
+        # data remains reachable via find_nearest_reference's approximate
+        # path; no examples/hw_configs/ file ever targeted it by exact match.
         reference_energy_pj_per_mac=0.00289,
         source=(
             "Garg, Jia, Phadke & Yu, 'A 28-nm FeFET Compute-in-Memory Macro "
@@ -272,6 +297,10 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
         crossbar_cols=512,
         adc_bits=6,
         weight_bits=1,
+        # STTRAM stands in for this chip's MRAM: hwcomponents_neurosim ships
+        # no separate generic-MRAM cell, and STT-MRAM is the dominant real
+        # MRAM implementation (see schemas.config.CIMDeviceType's docstring).
+        device_type=CIMDeviceType.STTRAM,
         # Deaville, Zhang & Verma 2022 (Princeton, VLSI Symposium): silicon-
         # measured, 22nm FD-SOI, a genuine 6-bit SAR ADC -- "a 6-b current-
         # to-digital converter (IDC), based on a SAR architecture". Array is
@@ -325,6 +354,7 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
         crossbar_cols=80,
         adc_bits=4,
         weight_bits=8,
+        device_type=CIMDeviceType.SRAM,
         # Korea Univ. (arXiv:2211.16008 -- open-access preprint of the
         # paywalled Lee/Kim/Park IEEE JSSC 2024 journal version of the same
         # design): silicon-measured, 28nm CMOS, a genuine "4-bit Coarse-Fine
@@ -369,6 +399,64 @@ KNOWN_REFERENCES: List[CalibrationReference] = [
             "size and weight_bits caveats above."
         ),
     ),
+    CalibrationReference(
+        crossbar_rows=64,
+        crossbar_cols=64,
+        adc_bits=4,
+        weight_bits=4,
+        device_type=CIMDeviceType.SRAM,
+        # Restored: originally in this list, then removed when the FeFET
+        # entry above was added (both share this (64, 64, 4-bit-ADC) key,
+        # and find_matching_reference() had no way to disambiguate them at
+        # the time -- see git history and the FeFET entry's own comment).
+        # Re-added now that device_type lets find_matching_reference()
+        # tell the two apart; fixes examples/hw_configs/
+        # calibrated_dong_2020_sram_64x64.json, which names this exact
+        # paper but, before this restoration, had no matching
+        # KNOWN_REFERENCES entry at all and so silently calibrated against
+        # the FeFET reference's number instead (the sole occupant of this
+        # key) -- a real (if narrow) example-vs-behavior mismatch this
+        # restoration corrects, not just a hypothetical.
+        #
+        # Dong, Sinangil et al. 2020 (ISSCC 15.3, TSMC): silicon-measured,
+        # 7nm FinFET, a genuine "4b Flash ADC" (explicit in the text --
+        # "column-wise Flash ADCs", "Each 4b Flash ADC consists of 15 SAs")
+        # -- matches this codebase's flash-ADC energy assumption more
+        # directly than any reference above. "351 TOPS/W" is the paper's
+        # headline efficiency; cross-checked its own MAC-to-op convention
+        # via throughput/cycle-time rather than assuming: 372.4 GOPS x 5.5ns
+        # cycle time = 2048 ops/cycle, and the macro does 1024 MAVs/cycle
+        # (64 inputs x 16 weights) -- so this paper also counts 1 MAC == 2
+        # ops (same convention as the Correll 2025 reference above, verified
+        # independently here rather than assumed). 2 / 351e12 J/MAC ~=
+        # 0.0057 pJ/MAC. (The paper separately reports a 7.8pJ *maximum*
+        # energy per cycle -- deliberately not used, since that is the
+        # worst-case all-1s pattern, not what the 351TOPS/W average-case
+        # headline efficiency reflects.)
+        reference_energy_pj_per_mac=0.0057,
+        source=(
+            "Dong, Sinangil, Erbagci, Sun, Khwa, Liao, Wang & Chang, 'A "
+            "351TOPS/W and 372.4GOPS Compute-in-Memory SRAM Macro in 7nm "
+            "FinFET CMOS for Machine-Learning Applications' (ISSCC 2020, "
+            "Session 15.3, pp. 242-243) -- '64x64 8T macro is fabricated "
+            "in 7nm FinFET technology... Energy efficiency is 351 TOPS/W "
+            "and throughput is 372.4 GOPS for 1024 (64x16) 4x4b MAV "
+            "operations'"
+        ),
+        note=(
+            "weight_bits=4 ('4b weight is realized by charge sharing among "
+            "binary-weighted computation caps'), input is also 4b (via RWL "
+            "pulse count). MAV = 'multiply-and-average', this paper's own "
+            "term for its accumulation operation across 64 inputs -- treated "
+            "as equivalent to a MAC here, same as every other reference in "
+            "this list. Originally sought for a 512x512/8-bit-ADC 'large-"
+            "scale server' target hardware profile; no silicon-measured "
+            "match at that array size/ADC resolution was found, so this "
+            "64x64/4-bit point was substituted as the closest real, "
+            "flash-ADC-based alternative -- a real repositioning, not a "
+            "stand-in for the original spec."
+        ),
+    ),
 ]
 
 
@@ -378,22 +466,44 @@ def find_matching_reference(hw: HWConfig) -> Optional[CalibrationReference]:
     *which* reference calibrated a given `HWConfig`, not just the resulting
     factor -- an opaque multiplier alone doesn't tell a researcher whether
     to trust it, or which paper's stated caveats (`CalibrationReference.note`)
-    apply to it."""
-    for reference in KNOWN_REFERENCES:
-        if (
-            reference.crossbar_rows == hw.crossbar_rows
-            and reference.crossbar_cols == hw.crossbar_cols
-            and reference.adc_bits == hw.adc_bits
-        ):
-            return reference
-    return None
+    apply to it.
+
+    Two references can share the same (crossbar_rows, crossbar_cols,
+    adc_bits) key (e.g. the FeFET and Dong/Sinangil SRAM entries at
+    (64, 64, 4)) -- `device_type` disambiguates them when they do. A single
+    candidate at that key is returned regardless of `device_type` (matches
+    this function's original, pre-device_type behavior for every non-
+    colliding key -- most hw_configs never need to state a device_type at
+    all). With multiple candidates, only one whose `device_type` equals
+    `hw.device_type` counts as a match; if `hw.device_type` is unset, or
+    matches none/more-than-one of the tied candidates, this returns `None`
+    (stays honestly uncalibrated) rather than guessing among them."""
+    candidates = [
+        reference
+        for reference in KNOWN_REFERENCES
+        if reference.crossbar_rows == hw.crossbar_rows
+        and reference.crossbar_cols == hw.crossbar_cols
+        and reference.adc_bits == hw.adc_bits
+    ]
+    if len(candidates) <= 1:
+        return candidates[0] if candidates else None
+    device_matches = [c for c in candidates if hw.device_type is not None and c.device_type == hw.device_type]
+    return device_matches[0] if len(device_matches) == 1 else None
 
 
 def compute_calibration_factor(hw: HWConfig, reference: CalibrationReference) -> float:
     """`reference.reference_energy_pj_per_mac` / this model's predicted
     energy-per-MAC for a single layer at the reference's own `weight_bits`
     -- the correction `profiler_tool` applies as a flat multiplier
-    (tools/simulators.py)."""
+    (tools/simulators.py). Uses `compute_energy_pj` (crossbar/ADC/DAC only),
+    not the total `energy_pj` -- every reference in `KNOWN_REFERENCES`
+    measures a crossbar macro's own energy efficiency, never a host SRAM
+    buffer's (`hw.sram_buffer_kb`, `simulate_cim_profile`'s separate
+    `buffer_energy_pj`); dividing by the total would silently fold an
+    unrelated, non-MAC-scaling cost into a per-MAC ratio, distorting it more
+    for small arrays (relatively more buffer energy per MAC) than large
+    ones. `profiler_tool` applies the resulting factor to `compute_energy_pj`
+    only for the same reason."""
     probe_layer = LayerBitConfig(
         layer_name="_calibration_probe",
         weight_bits=reference.weight_bits,
@@ -402,7 +512,7 @@ def compute_calibration_factor(hw: HWConfig, reference: CalibrationReference) ->
     )
     predicted = simulate_cim_profile(hw, [probe_layer])
     num_macs = hw.crossbar_rows * hw.crossbar_cols
-    predicted_energy_pj_per_mac = predicted["energy_pj"] / num_macs if num_macs else 0.0
+    predicted_energy_pj_per_mac = predicted["compute_energy_pj"] / num_macs if num_macs else 0.0
     if predicted_energy_pj_per_mac <= 0:
         return 1.0
     return reference.reference_energy_pj_per_mac / predicted_energy_pj_per_mac
@@ -452,11 +562,14 @@ def bootstrap_calibration_provenance(hw: HWConfig) -> Dict[str, Dict[str, Any]]:
 # =============================================================================
 # Opt-in scaling-law (nearest-reference) approximate calibration
 #
-# Everything above this line is the exact-match path main.py uses by
-# default. Everything below is a separate, explicitly-named fallback for
-# callers that want a best-effort correction for a HWConfig with no exact
-# match in KNOWN_REFERENCES -- never wired into the functions above, so
-# adding entries here changes nothing for existing exact-match callers.
+# Everything above this line is the strict exact-match path
+# (--exact-calibration-only). Everything below is main.py's own actual
+# default (build_initial_state's allow_approximate_calibration=True): a
+# best-effort correction for a HWConfig with no exact match in
+# KNOWN_REFERENCES, applied unconditionally -- not just as an opt-in
+# fallback -- unless --exact-calibration-only is passed. Never wired into
+# the functions above, so adding entries here changes nothing for callers
+# that do pass --exact-calibration-only.
 # =============================================================================
 
 
@@ -485,10 +598,31 @@ def find_nearest_reference(hw: HWConfig) -> Optional[Tuple[CalibrationReference,
     Unlike `find_matching_reference`, always returns *something* (there is
     always a "nearest" reference as long as the list is non-empty), which is
     exactly why callers must treat this as an approximation and surface the
-    distance, never present it the way an exact match is presented."""
+    distance, never present it the way an exact match is presented.
+
+    Ties in `_reference_distance` (e.g. the FeFET/Dong-Sinangil pair, both
+    at (64, 64, 4-bit-ADC), distance 0.0 from a hw_config with that exact
+    array/ADC) are broken by `device_type` when `hw` states one: a
+    reference whose `device_type` matches `hw.device_type` is preferred over
+    one that doesn't (or doesn't state one), the same disambiguation
+    `find_matching_reference` uses for its own exact-match collisions. This
+    matters even for a hw_config with an *exact* array/ADC match, since this
+    function -- unlike `find_matching_reference` -- is main.py's actual
+    default path (`allow_approximate_calibration=True`): without this
+    tie-break, `min()` would silently return whichever tied reference
+    happens to come first in `KNOWN_REFERENCES`'s list order, regardless of
+    which device technology `hw` actually states. The returned `distance`
+    itself is unaffected -- still purely `_reference_distance`'s array-size/
+    adc_bits metric, never conflated with the device_type tie-break used to
+    pick among equally-distant candidates."""
     if not KNOWN_REFERENCES:
         return None
-    nearest = min(KNOWN_REFERENCES, key=lambda reference: _reference_distance(hw, reference))
+
+    def _rank_key(reference: CalibrationReference) -> Tuple[float, int]:
+        device_type_mismatch = int(hw.device_type is not None and reference.device_type != hw.device_type)
+        return (_reference_distance(hw, reference), device_type_mismatch)
+
+    nearest = min(KNOWN_REFERENCES, key=_rank_key)
     return nearest, _reference_distance(hw, nearest)
 
 
