@@ -11,7 +11,9 @@ since this module never touches the middleware registry/contextvars at all.
 from concurrent.futures import ThreadPoolExecutor
 
 from nodes.planner import real_stage_names, warmup_count
+from schemas.tools import LayerBitConfig
 from tools.batch_warmup import run_parallel_warmup
+from tools.cim_physics import simulate_cim_profile
 from tools.search import compute_pareto_rank
 
 
@@ -74,9 +76,16 @@ def test_run_parallel_warmup_honors_calibration_factors(good_hw_config):
     calibrated, _, _ = run_parallel_warmup("resnet18", good_hw_config, calibration_factors={good_hw_config.hw_spec_id: 2.0})
 
     # Same candidates (deterministic seed) -> same layer_configs -> the only
-    # difference should be the calibration multiplier applied to energy_pj.
+    # difference should be the calibration multiplier applied to
+    # compute_energy_pj (tools/simulators.py's profiler_tool never scales
+    # buffer_energy_pj by it -- see that function's docstring), so the
+    # expected total is recomputed directly rather than assumed to be a
+    # flat *2.0 of the whole energy_pj.
     for u, c in zip(sorted(uncalibrated, key=lambda e: e["iteration"]), sorted(calibrated, key=lambda e: e["iteration"])):
-        assert c["energy_pj"] == u["energy_pj"] * 2.0
+        layer_configs = [LayerBitConfig(**lc) for lc in u["layer_configs"]]
+        profile = simulate_cim_profile(good_hw_config, layer_configs)
+        expected = round(profile["compute_energy_pj"] * 2.0 + profile["buffer_energy_pj"], 6)
+        assert c["energy_pj"] == expected
 
 
 def test_run_parallel_warmup_planner_decisions_match_candidate_iterations(good_hw_config):
