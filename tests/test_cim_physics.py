@@ -8,7 +8,13 @@ covered elsewhere.
 
 from schemas.config import NoCTopology
 from schemas.tools import LayerBitConfig
-from tools.cim_physics import crossbar_passes, hop_distance, simulate_cim_profile, simulate_noc_mapping
+from tools.cim_physics import (
+    crossbar_passes,
+    hop_distance,
+    simulate_cim_profile,
+    simulate_noc_mapping,
+    snap_pruning_ratio,
+)
 
 
 def _layer(weight_bits=6, activation_bits=6, pruning=0.0, name="l0"):
@@ -228,3 +234,50 @@ def test_noc_transfer_latency_stays_per_layer_boundary(good_hw_config):
     real = simulate_noc_mapping(good_hw_config, [_layer(name="layer4.1")], stage_weight_shapes=_RESNET_LAYER4_SHAPES)
 
     assert real["noc_latency_ms"] == blind["noc_latency_ms"]
+
+
+# --- snap_pruning_ratio: drop to realizable pruning points ------------------
+
+
+_WIDE = [(4608, 512, 1)]  # resnet18 layer4-style: 4 column-tiles at 128 cols
+_NARROW = [(147, 64, 1)]  # resnet18 conv1-style: already one column-tile
+
+
+def test_snap_drops_a_ratio_that_removes_no_array_to_zero(good_hw_config):
+    """512 cols / 128 = 4 tiles; 0.2 pruning leaves 409 cols, still 4 tiles.
+    That ratio costs real accuracy for exactly zero energy, so it must snap
+    away rather than be proposed."""
+    assert snap_pruning_ratio(0.2, _WIDE, good_hw_config, 0.5) == 0.0
+
+
+def test_snap_keeps_a_ratio_that_really_removes_an_array(good_hw_config):
+    assert snap_pruning_ratio(0.25, _WIDE, good_hw_config, 0.5) == 0.25
+    assert snap_pruning_ratio(0.5, _WIDE, good_hw_config, 0.5) == 0.5
+
+
+def test_snap_rounds_down_never_up(good_hw_config):
+    """Snapping up would prune more than the search asked for -- the
+    dominance argument only holds downward (same passes, less weight lost)."""
+    assert snap_pruning_ratio(0.45, _WIDE, good_hw_config, 0.5) == 0.25
+
+
+def test_snap_zeroes_a_stage_that_can_never_save_an_array(good_hw_config):
+    """A layer already inside one column-tile cannot drop below one array no
+    matter how much is pruned, so every ratio there is pure accuracy loss."""
+    for ratio in (0.1, 0.25, 0.5):
+        assert snap_pruning_ratio(ratio, _NARROW, good_hw_config, 0.5) == 0.0
+
+
+def test_snapped_ratio_never_costs_more_energy_than_the_requested_one(good_hw_config):
+    """The dominance property the snap rests on, asserted directly."""
+    for requested in (0.05, 0.12, 0.2, 0.3, 0.45, 0.5):
+        snapped = snap_pruning_ratio(requested, _WIDE, good_hw_config, 0.5)
+        assert snapped <= requested
+        assert crossbar_passes(4608, 512, 1, good_hw_config, snapped) == crossbar_passes(
+            4608, 512, 1, good_hw_config, requested
+        )
+
+
+def test_snap_without_shapes_is_a_no_op_to_zero(good_hw_config):
+    assert snap_pruning_ratio(0.3, None, good_hw_config, 0.5) == 0.0
+    assert snap_pruning_ratio(0.0, _WIDE, good_hw_config, 0.5) == 0.0
