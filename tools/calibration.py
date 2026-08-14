@@ -579,17 +579,26 @@ def _reference_distance(hw: HWConfig, reference: CalibrationReference) -> float:
     fields. `adc_bits` is compared directly (in bits): the analytical
     model's dominant nonlinearity, `2**adc_bits` in tools/cim_physics.py,
     already lives on this exact axis, so this distance only needs to *rank*
-    candidates, not reproduce that curve itself. Total array size
-    (`crossbar_rows * crossbar_cols`) is compared in log2 space -- i.e. by
-    how many array-size *doublings* apart two configs are, not their raw
-    cell-count gap -- so e.g. 128x128 -> 256x256 (one doubling) ranks closer
-    than 128x128 -> 64x32 (a smaller raw cell-count gap, but a differently-
-    shaped array reached by mixed halving/quartering, not one clean step)."""
-    size_distance = abs(
-        math.log2(hw.crossbar_rows * hw.crossbar_cols) - math.log2(reference.crossbar_rows * reference.crossbar_cols)
-    )
+    candidates, not reproduce that curve itself.
+
+    `crossbar_rows` and `crossbar_cols` are compared **separately**, each in
+    log2 space -- i.e. by how many doublings apart the two arrays are along
+    each axis. This used to compare only their product (total cell count),
+    which made the stated "zero iff exact match" invariant false and had a
+    real consequence: a 128x128/8-bit hw_config came out distance 0.0 from
+    the 256x64/8-bit Correll reference (same 16384 cells), so an
+    aspect-ratio-mismatched reference was picked *and* reported as a
+    zero-distance match. Array shape is not a free parameter here -- one
+    pass of a 256x64 array converts 64 columns through its ADCs while a
+    128x128 array converts 128, so `simulate_cim_profile`'s per-column ADC
+    term (the dominant one) differs by 2x between two arrays this metric
+    called identical. Under per-axis comparison that same hw_config
+    correctly resolves to the 128x128/7-bit NeuroSim reference
+    (distance 1.0, one ADC bit away, exact array shape)."""
+    row_distance = abs(math.log2(hw.crossbar_rows) - math.log2(reference.crossbar_rows))
+    col_distance = abs(math.log2(hw.crossbar_cols) - math.log2(reference.crossbar_cols))
     adc_distance = abs(hw.adc_bits - reference.adc_bits)
-    return size_distance + adc_distance
+    return row_distance + col_distance + adc_distance
 
 
 def find_nearest_reference(hw: HWConfig) -> Optional[Tuple[CalibrationReference, float]]:
@@ -612,9 +621,9 @@ def find_nearest_reference(hw: HWConfig) -> Optional[Tuple[CalibrationReference,
     tie-break, `min()` would silently return whichever tied reference
     happens to come first in `KNOWN_REFERENCES`'s list order, regardless of
     which device technology `hw` actually states. The returned `distance`
-    itself is unaffected -- still purely `_reference_distance`'s array-size/
-    adc_bits metric, never conflated with the device_type tie-break used to
-    pick among equally-distant candidates."""
+    itself is unaffected -- still purely `_reference_distance`'s per-axis
+    array-shape/adc_bits metric, never conflated with the device_type
+    tie-break used to pick among equally-distant candidates."""
     if not KNOWN_REFERENCES:
         return None
 
