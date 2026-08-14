@@ -390,6 +390,32 @@ def run_qat_tuning(
     -- touched exactly once, after every training/early-stopping decision is
     already final, so the reported number isn't leaked into those decisions.
 
+    Two things `early_stopping_patience` deliberately does *not* do. It
+    never restores the best-validation-loss weights: the returned accuracy
+    is always the last epoch trained, whether the loop ran out of epochs or
+    stopped early, since no checkpoint is kept. And it is off in every
+    production path -- `tools/simulators.py`'s `tuner_tool` leaves
+    `TunerToolInput.early_stopping_patience` at its `None` default, so a
+    real session always trains the full `max_epochs`
+    (`resolve_max_epochs()`); the parameter exists for callers that pass it
+    explicitly (tests). Adding best-weight restore would change every
+    accuracy this project has already measured, so it is a deliberate
+    deferral rather than an oversight.
+
+    Thread-safety caveat, deliberately not papered over: `seed` below seeds
+    torch's **global** RNG, and `backend.train_loader` is a `shuffle=True`
+    DataLoader with no explicit generator, so its per-epoch permutation is
+    drawn from that same global RNG. Concurrent trials therefore do not get
+    independent, reproducible streams -- `tools/batch_warmup.py`'s thread
+    pool has each worker reseed the global RNG mid-flight of the others, so
+    with more than one worker a candidate's accuracy is not reproducible
+    from `(stage_configs, seed)` alone. One worker (the default on a single
+    CUDA device, for the separate reason batch_warmup documents) has no such
+    race. Making this genuinely thread-safe means giving each trial its own
+    generator-backed train loader, which changes the permutation every
+    existing result was measured under -- a deliberate deferral, not an
+    oversight.
+
     `seed`, if given, seeds torch's global RNG right before training starts
     -- `backend.base_model`'s own weights are deterministic (a cached,
     already-initialized instance, deep-copied unchanged every call), so the
