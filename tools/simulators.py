@@ -20,10 +20,6 @@ Research_Plan.md's sense, not bindings to the actual NeuroSim/CIM-Loop
 C-extensions (docs/coding_guidelines.md 5.D: Mock First for those) -- `calibration_factors`
 (per hw_spec_id) is the intended correction loop against precise simulation
 over time.
-
-@search_paper remains Mock First (docs/coding_guidelines.md 5.D): no real literature-search
-backend is wired up yet. Swap its function body later without touching call
-sites -- the `wrap_tool_call` signature is unchanged.
 """
 
 from __future__ import annotations
@@ -36,9 +32,6 @@ from schemas.tools import (
     PrecisionCheckToolOutput,
     ProfilerToolInput,
     ProfilerToolOutput,
-    SearchPaperResult,
-    SearchPaperToolInput,
-    SearchPaperToolOutput,
     ToolStatus,
     TunerToolInput,
     TunerToolOutput,
@@ -67,7 +60,7 @@ def tuner_tool(args: TunerToolInput) -> TunerToolOutput:
     avg_pruning_ratio = sum(lc.column_pruning_ratio for lc in args.layer_configs) / len(args.layer_configs)
     stage_configs = {lc.layer_name: (lc.weight_bits, lc.column_pruning_ratio) for lc in args.layer_configs}
 
-    backend = get_qat_backend(args.execution_context.model_id)
+    backend = get_qat_backend(args.execution_context.model_id, args.execution_context.dataset_id)
     tuning_result = run_qat_tuning(
         backend,
         stage_configs=stage_configs,
@@ -80,6 +73,7 @@ def tuner_tool(args: TunerToolInput) -> TunerToolOutput:
         # column), not a per-stage search parameter -- args.hw_config,
         # not args.layer_configs.
         adc_bits=args.hw_config.adc_bits,
+        seed=args.execution_context.run_seed,
     )
 
     return TunerToolOutput(
@@ -122,13 +116,18 @@ def profiler_tool(args: ProfilerToolInput) -> ProfilerToolOutput:
     conversion time (CIM's parallel-array MAC property). The result is
     still a *fast approximation* (Research_Plan.md 3) -- scaled by this
     hw_spec_id's `calibration_factors` entry, which the verify loop is
-    meant to refine against precise simulation over time.
+    meant to refine against precise simulation over time. Only
+    `compute_energy_pj` (crossbar/ADC/DAC) is scaled by that factor --
+    `buffer_energy_pj` (SRAM buffer staging) isn't derived from any
+    calibration reference (see tools/calibration.py's compute_calibration_factor)
+    and is added back in afterward, unscaled, to get the final `energy_pj`.
     """
     profile = simulate_cim_profile(args.hw_config, args.layer_configs)
 
     calibration_factors = dict(args.calibration_factors or {})
     factor = calibration_factors.setdefault(args.hw_config.hw_spec_id, 1.0)
-    profile["energy_pj"] = round(profile["energy_pj"] * factor, 6)
+    profile["compute_energy_pj"] = round(profile["compute_energy_pj"] * factor, 6)
+    profile["energy_pj"] = round(profile["compute_energy_pj"] + profile["buffer_energy_pj"], 6)
     profile["latency_ns"] = round(profile["latency_ns"] * factor, 6)
 
     return ProfilerToolOutput(
@@ -142,10 +141,12 @@ def profiler_tool(args: ProfilerToolInput) -> ProfilerToolOutput:
 
 @wrap_tool_call(VerifierToolInput, node_name="verifier")
 def verifier_tool(args: VerifierToolInput) -> VerifierToolOutput:
-    """Mock fast-approximation verifier: synthesizes @mapper + @profiler
-    results and checks them against IR-drop/noise bounds derived from
-    `args.hw_config` (wire_resistance_ohm_per_um, device_noise_sigma) --
-    never a hardcoded tolerance tied to one specific chip.
+    """Real IR-drop/noise-margin verifier (analytical fast-approximation,
+    same Research_Plan.md 3 sense as @mapper/@profiler -- not a placeholder):
+    synthesizes @mapper + @profiler results and checks them against IR-drop/
+    noise bounds derived from `args.hw_config` (wire_resistance_ohm_per_um,
+    device_noise_sigma) -- never a hardcoded tolerance tied to one specific
+    chip.
     """
     hw = args.hw_config
     wire_resistance = hw.wire_resistance_ohm_per_um or 0.0
@@ -188,9 +189,17 @@ def precision_check_tool(args: PrecisionCheckToolInput) -> PrecisionCheckToolOut
     itself uses) with the precise energy number in place of the fast one --
     accuracy/noc_latency_ms are passed through unchanged (analog crossbar/
     ADC fidelity is this check's scope, not @tuner's measured accuracy or
-    @mapper's NoC routing time)."""
+    @mapper's NoC routing time). `calibration_factor` is derived from the
+    *compute-only* raw/precise pair, not the totals -- consistent with
+    `tools.calibration.compute_calibration_factor` (which this self-updated
+    factor feeds the same `calibration_factors[hw_spec_id]` slot as) never
+    folding SRAM buffer energy into a MAC-scaling calibration ratio, and
+    with `profiler_tool` only ever applying a calibration_factor to
+    `compute_energy_pj`."""
     result = simulate_precise_energy(args.hw_config, args.layer_configs)
-    calibration_factor = compute_updated_calibration_factor(result["raw_energy_pj"], result["precise_energy_pj"])
+    calibration_factor = compute_updated_calibration_factor(
+        result["raw_compute_energy_pj"], result["precise_compute_energy_pj"]
+    )
 
     target_errors = check_targets(
         args.accuracy,
@@ -211,18 +220,3 @@ def precision_check_tool(args: PrecisionCheckToolInput) -> PrecisionCheckToolOut
             "target_errors": target_errors,
         },
     )
-
-
-@wrap_tool_call(SearchPaperToolInput, node_name="search_paper")
-def search_paper_tool(args: SearchPaperToolInput) -> SearchPaperToolOutput:
-    """Mock academic-DB search tool, for analyzing unfamiliar custom
-    operators and looking up SOTA compression hyperparameter guidelines."""
-    results = [
-        SearchPaperResult(
-            title=f"Mock result {i + 1} for query: {args.query}",
-            url=None,
-            summary="Mock abstract -- replace with a real literature-search backend.",
-        )
-        for i in range(args.top_k)
-    ]
-    return SearchPaperToolOutput(status=ToolStatus.SUCCESS, data={"results": results})
