@@ -80,13 +80,13 @@ more-precise number.
 import json
 import os
 import subprocess
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from hwcomponents_adc import ADC
 
 from schemas.config import CIMDeviceType, HWConfig
 from schemas.tools import LayerBitConfig
-from tools.cim_physics import CIM_TECH_PARAMS, simulate_cim_profile
+from tools.cim_physics import CIM_TECH_PARAMS, crossbar_passes, simulate_cim_profile
 
 try:
     from hwcomponents_neurosim import ColDrivers, MemoryCell, RowDrivers
@@ -421,7 +421,9 @@ def _ensure_docker_container_running(image: str, container: str) -> bool:
 
 
 def _call_docker_precision_bridge(
-    hw: HWConfig, layer_configs: List[LayerBitConfig]
+    hw: HWConfig,
+    layer_configs: List[LayerBitConfig],
+    stage_weight_shapes: Optional[Dict[str, List[Tuple[int, int, int]]]] = None,
 ) -> Optional[Dict[str, float]]:
     """Opt-in (`AUTOCIM_PRECISION_BACKEND=docker`, default `local`, same
     local-first-by-default/opt-in-cloud pattern `llm.py`'s
@@ -454,6 +456,9 @@ def _call_docker_precision_bridge(
         {
             "hw_config": hw.model_dump(mode="json"),
             "layer_configs": [lc.model_dump(mode="json") for lc in layer_configs],
+            # Stage-1 and Stage-2 must agree on pass counts (_layer_pass_counts);
+            # the container has no model registry, so ship the shapes with the payload.
+            "stage_weight_shapes": stage_weight_shapes,
         }
     )
     command = (
@@ -479,7 +484,52 @@ def _call_docker_precision_bridge(
         return None
 
 
-def simulate_precise_energy(hw: HWConfig, layer_configs: List[LayerBitConfig]) -> Dict[str, float]:
+def _layer_pass_counts(
+    hw: HWConfig,
+    layer_configs: List[LayerBitConfig],
+    stage_weight_shapes: Optional[Dict[str, List[Tuple[int, int, int]]]],
+) -> List[int]:
+    """Per-entry crossbar activation counts, identical to what
+    `tools.cim_physics.simulate_cim_profile` charges.
+
+    Stage-2 has to charge the same multiplicity as Stage-1. Before this
+    existed, every term below assumed one array per `layer_configs` entry
+    while @profiler had already moved to real per-layer pass counts, so a
+    stage needing 288 arrays was priced as 1 here and as 288 there.
+
+    What that did and did not break, precisely:
+    - The derived `calibration_factor` was *not* the casualty: it is a ratio
+      of precise to raw energy, and a uniform multiplicity cancels out of it
+      (asserted directly in tests/test_precision_check.py). Real sessions
+      before and after this fix both land near 52x, which is the genuine
+      real-ADC-vs-analytical gap.
+    - The absolute numbers were. `raw_energy_pj`/`precise_energy_pj` came
+      back on the shape-blind scale (tens of pJ) while everything else in
+      the run -- @profiler's `energy_pj`, `candidate_history`, and any
+      `--target-energy-pj` the researcher set -- was on the shape-aware
+      scale (millions of pJ). `precision_check_tool` feeds
+      `precise_energy_pj` straight into `tools.targets.check_targets`, so a
+      Stage-2 energy target comparison was off by the pass count and would
+      wave through a candidate it should have rejected."""
+    if not stage_weight_shapes:
+        return [1] * len(layer_configs)
+    counts = []
+    for lc in layer_configs:
+        shapes = stage_weight_shapes.get(lc.layer_name)
+        if not shapes:
+            counts.append(1)
+            continue
+        counts.append(
+            sum(crossbar_passes(rows, cols, groups, hw, lc.column_pruning_ratio) for rows, cols, groups in shapes)
+        )
+    return counts
+
+
+def simulate_precise_energy(
+    hw: HWConfig,
+    layer_configs: List[LayerBitConfig],
+    stage_weight_shapes: Optional[Dict[str, List[Tuple[int, int, int]]]] = None,
+) -> Dict[str, float]:
     """Recomputes `tools.cim_physics.simulate_cim_profile`'s energy with its
     analytical ADC/DAC/crossbar-MAC/SRAM-buffer terms each independently
     replaced by a real model when one is available -- ADC via
@@ -515,19 +565,23 @@ def simulate_precise_energy(hw: HWConfig, layer_configs: List[LayerBitConfig]) -
     if os.environ.get(_PRECISION_BACKEND_ENV_VAR, "local") == "docker" and not (
         _NEUROSIM_AVAILABLE and _CACTI_AVAILABLE
     ):
-        bridged = _call_docker_precision_bridge(hw, layer_configs)
+        bridged = _call_docker_precision_bridge(hw, layer_configs, stage_weight_shapes)
         if bridged is not None:
             return bridged
 
-    raw_profile = simulate_cim_profile(hw, layer_configs)
+    raw_profile = simulate_cim_profile(hw, layer_configs, stage_weight_shapes=stage_weight_shapes)
     raw_energy_pj = raw_profile["energy_pj"]
     raw_compute_energy_pj = raw_profile["compute_energy_pj"]
     raw_buffer_energy_pj = raw_profile["buffer_energy_pj"]
 
-    n_layers = len(layer_configs)
+    # Every term below is charged per *crossbar activation*, not per
+    # layer_configs entry -- the same multiplicity simulate_cim_profile uses
+    # above (see _layer_pass_counts for why they must not diverge).
+    passes = _layer_pass_counts(hw, layer_configs, stage_weight_shapes)
+    total_passes = sum(passes)
     compute_delta_fj = 0.0
 
-    n_conversions = hw.crossbar_cols * n_layers
+    n_conversions = hw.crossbar_cols * total_passes
     real_adc_conversion_fj = _real_adc_conversion_energy_fj(hw)
     if real_adc_conversion_fj is not None:
         analytical_adc_fj = CIM_TECH_PARAMS.adc_ref_energy_fj * (2**hw.adc_bits) * n_conversions
@@ -535,16 +589,16 @@ def simulate_precise_energy(hw: HWConfig, layer_configs: List[LayerBitConfig]) -
 
     real_dac_fj_per_layer = _real_dac_conversion_energy_fj(hw)
     if real_dac_fj_per_layer is not None:
-        analytical_dac_fj = CIM_TECH_PARAMS.dac_ref_energy_fj * hw.dac_bits * hw.crossbar_rows * n_layers
-        compute_delta_fj += real_dac_fj_per_layer * n_layers - analytical_dac_fj
+        analytical_dac_fj = CIM_TECH_PARAMS.dac_ref_energy_fj * hw.dac_bits * hw.crossbar_rows * total_passes
+        compute_delta_fj += real_dac_fj_per_layer * total_passes - analytical_dac_fj
 
     real_crossbar_fj_per_pass = _real_crossbar_mac_energy_fj_per_pass(hw)
     if real_crossbar_fj_per_pass is not None:
         analytical_crossbar_fj = sum(
-            CIM_TECH_PARAMS.crossbar_ref_energy_fj * hw.crossbar_rows * hw.crossbar_cols * lc.weight_bits
-            for lc in layer_configs
+            CIM_TECH_PARAMS.crossbar_ref_energy_fj * hw.crossbar_rows * hw.crossbar_cols * lc.weight_bits * n
+            for lc, n in zip(layer_configs, passes)
         )
-        real_crossbar_fj = sum(real_crossbar_fj_per_pass * lc.weight_bits for lc in layer_configs)
+        real_crossbar_fj = sum(real_crossbar_fj_per_pass * lc.weight_bits * n for lc, n in zip(layer_configs, passes))
         compute_delta_fj += real_crossbar_fj - analytical_crossbar_fj
 
     precise_compute_energy_pj = round(raw_compute_energy_pj + compute_delta_fj / 1000.0, 6)
