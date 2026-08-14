@@ -22,6 +22,24 @@ needed; the other fields (`num_tiles`, `dac_bits`, `noc_topology`,
 defaults `default_cim_v1_128x128.json` uses, since `KNOWN_REFERENCES` doesn't
 constrain them. Session start prints `[calibration] exact match` to confirm.
 
+Each also sets `device_type` to match its "Tech" column below (`rram`/
+`sram`/`sttram`) -- inside the Docker image (`hwcomponents-neurosim`
+installed), this picks a real device-specific `.cell` config for
+`@precision_verifier`'s DAC/crossbar-MAC energy terms instead of NeuroSim's
+generic placeholder cell (see `tools/precision_check.py`'s module
+docstring). `calibrated_deaville_2022_mram_256x512.json`'s MRAM maps to
+`sttram`: NeuroSim ships no separate generic-MRAM cell, and STT-MRAM is the
+dominant real MRAM implementation (see `schemas.config.CIMDeviceType`).
+`calibrated_daram_2021_reram_64x32.json` is the one exception -- despite its
+filename (a pre-`device_type` label), DARAM's capacitor-based analog storage
+isn't RRAM's resistive-switching physics, and `CIMDeviceType` has no generic
+capacitive-analog member either, so this file deliberately leaves
+`device_type` unset (falls back to NeuroSim's placeholder cell in Docker,
+same as any hw_config with no stated device technology). `device_type` also
+now disambiguates `tools/calibration.py`'s reference matching when two
+literature references share the same (array, ADC) key -- see that module's
+`find_matching_reference`.
+
 | File | Reference (`tools/calibration.py`) | Array | ADC | Tech |
 |---|---|---|---|---|
 | `calibrated_neurosim_v1_5.json` | NeuroSim V1.5 (simulated) | 128x128 | 7-bit | ReRAM |
