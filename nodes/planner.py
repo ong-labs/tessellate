@@ -74,7 +74,8 @@ from observability import log_event
 from schemas.planner import PlannerLayerDecision
 from schemas.tools import LayerBitConfig
 from state import AutoCIMState, merge_dicts
-from tools.qat import get_layer_groups
+from tools.cim_physics import snap_pruning_ratio
+from tools.qat import get_layer_groups, get_stage_weight_shapes
 from tools.search import (
     Bounds,
     StagePoint,
@@ -262,22 +263,60 @@ def _propose_stage_points(
     return point, f"surrogate-model acquisition over {len(history)} prior candidates"
 
 
-def points_to_stage_configs(stage_points: StagePoint, stage_names: List[str]) -> List[LayerBitConfig]:
+def points_to_stage_configs(
+    stage_points: StagePoint,
+    stage_names: List[str],
+    hw: Optional[Any] = None,
+    stage_weight_shapes: Optional[Dict[str, List[Tuple[int, int, int]]]] = None,
+) -> List[LayerBitConfig]:
     """One `LayerBitConfig` per real stage: each stage's own independently
-    searched (weight_bits, column_pruning_ratio) point, just rounded/clamped
-    to valid values -- no per-stage bias is applied here, since the search
-    itself (`_propose_stage_points`) already explored each stage
-    independently."""
+    searched (weight_bits, column_pruning_ratio) point, rounded/clamped to
+    physically realizable values -- no per-stage bias is applied here, since
+    the search itself (`_propose_stage_points`) already explored each stage
+    independently.
+
+    `weight_bits` is rounded to an integer for the obvious reason: there is
+    no 4.7-bit crossbar cell. Passing `hw` *and* `stage_weight_shapes`
+    (`tools.qat.get_stage_weight_shapes`) applies the same kind of rounding
+    to the pruning axis via `tools.cim_physics.snap_pruning_ratio` -- energy
+    only drops when pruning removes a whole crossbar array, so a ratio
+    between two tile boundaries is not a realizable design point either, it
+    is strictly the same hardware with more weights thrown away. Snapping
+    down weakly dominates (same passes, less accuracy lost); see that
+    function's docstring for the measured evidence. Omit both to keep the
+    raw clamp, which is what callers without a resolved model/hardware
+    (tests, `tools/optuna_compare.py`'s independent search space) still
+    use."""
     configs = []
     for name, (bits, pruning) in zip(stage_names, stage_points):
         stage_bits = max(_WEIGHT_BITS_MIN, round(bits))
         stage_pruning = round(min(max(pruning, 0.0), _PRUNING_RATIO_MAX), 4)
+        if hw is not None and stage_weight_shapes is not None:
+            stage_pruning = snap_pruning_ratio(
+                stage_pruning, stage_weight_shapes.get(name), hw, _PRUNING_RATIO_MAX
+            )
         configs.append(
             LayerBitConfig(
                 layer_name=name, weight_bits=stage_bits, activation_bits=stage_bits, column_pruning_ratio=stage_pruning
             )
         )
     return configs
+
+
+def _snapping_context(model_id: str, hw_spec_id: str) -> Tuple[Optional[Any], Optional[Dict[str, List[Tuple[int, int, int]]]]]:
+    """`(hw, stage_weight_shapes)` for `points_to_stage_configs`' pruning
+    snap, or `(None, None)` if either can't be resolved.
+
+    Degrading to `(None, None)` keeps the raw clamp rather than failing the
+    planner over a model/hardware lookup: an unregistered `hw_spec_id` or an
+    unimportable custom `--model-id` already surfaces as its own error
+    elsewhere (`search_bounds` and @tuner respectively). `tools/batch_warmup.py`
+    calls this same helper so the parallel warm-up path snaps identically to
+    the sequential one -- the two must agree candidate-for-candidate."""
+    try:
+        return get_hw_config(hw_spec_id), get_stage_weight_shapes(model_id)
+    except Exception:  # noqa: BLE001 -- see docstring: degrade to the raw clamp
+        return None, None
 
 
 def _describe_hw_bounds(hw_spec_id: str) -> str:
@@ -410,7 +449,9 @@ def planner_node(state: AutoCIMState) -> Dict[str, Any]:
 
     stage_names = real_stage_names(state["model_id"])
     stage_points, search_tag = _propose_stage_points(state, stage_names, overrides)
-    stage_configs = points_to_stage_configs(stage_points, stage_names)
+    stage_configs = points_to_stage_configs(
+        stage_points, stage_names, *_snapping_context(state["model_id"], state["hw_spec_id"])
+    )
 
     # stage_configs is what actually reaches @tuner on every path below,
     # whether or not the LLM call even runs -- the LLM only ever supplies
