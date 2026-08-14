@@ -504,3 +504,45 @@ def test_resolve_device_auto_detects_a_real_device_when_unconfigured(monkeypatch
 def test_run_qat_tuning_reports_the_device_it_actually_used(fake_qat_backend):
     result = run_qat_tuning(fake_qat_backend, stage_configs={}, default_config=(4, 0.25), max_epochs=1, device="cpu")
     assert result["device"] == "cpu"
+
+
+# --- get_stage_weight_shapes: real crossbar mapping shapes ------------------
+
+
+def test_stage_weight_shapes_cover_every_stage_get_layer_groups_reports():
+    """The physics model keys shapes by stage name (tools/cim_physics.py's
+    _passes_for_layer), so a stage missing here silently falls back to the
+    one-array-per-entry approximation instead of its real cost."""
+    from tools.qat import get_layer_groups, get_stage_weight_shapes
+
+    shapes = get_stage_weight_shapes("resnet18")
+
+    assert set(shapes) == set(get_layer_groups("resnet18"))
+    assert all(shapes[stage] for stage in shapes), "no stage should resolve to zero mappable layers"
+
+
+def test_stage_weight_shapes_reports_real_conv_matrix_dimensions():
+    """resnet18's layer4.1 is two 3x3x512x512 convs -> (512*3*3, 512, 1)."""
+    from tools.qat import get_stage_weight_shapes
+
+    assert get_stage_weight_shapes("resnet18")["layer4.1"] == [(4608, 512, 1), (4608, 512, 1)]
+
+
+def test_stage_weight_shapes_marks_depthwise_convs_with_their_group_count():
+    """A depthwise conv must report groups == in_channels and the small
+    per-group row count, not the dense matrix it would be if the
+    block-diagonal zeros were stored (tools/cim_physics.py relies on this
+    to pack them)."""
+    from tools.qat import get_stage_weight_shapes
+
+    depthwise = [
+        (rows, cols, groups)
+        for stage_shapes in get_stage_weight_shapes("mobilenet_v2").values()
+        for rows, cols, groups in stage_shapes
+        if groups > 1
+    ]
+
+    assert depthwise, "mobilenet_v2 must expose depthwise layers"
+    for rows, cols, groups in depthwise:
+        assert rows == 9, "3x3 depthwise: one input channel x 3x3 kernel"
+        assert cols == groups, "one output channel per group"
