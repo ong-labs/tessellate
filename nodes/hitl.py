@@ -4,6 +4,21 @@ Uses LangGraph's v0.2+ dynamic `interrupt()` standard (docs/coding_guidelines.md
 no `interrupt_before` in `compile()`, and no `graph.update_state()` call
 here that would duplicate the state update `interrupt()`'s return value
 already provides on resume (`Command(resume=...)`).
+
+Two resume shapes: `{"new_bounds": {...}}` (routes back to @planner with
+narrowed bounds, the original/only behavior) and `{"conclude_with_best":
+True}` (routes straight to `END` instead -- for `main.py`'s auto-hitl
+giving up after its round cap, rather than leaving the session paused
+forever with no real path to a final state). `graph.py`'s `hitl_router`
+reads `low_confidence_conclusion` to pick the edge.
+
+The conclude path deliberately does not *select* a candidate itself: it
+only records `low_confidence_conclusion=True`, and each reporting consumer
+(`main.py`'s `print_final_state`, `tools/dashboard.py`) applies
+`tools.search.best_known_candidate` to the existing `candidate_history`.
+Keeping selection out of this node means there is exactly one selection
+rule to keep correct, and no stale copy of a "chosen" candidate on state
+that a later iteration could contradict.
 """
 
 from typing import Any, Dict
@@ -44,6 +59,19 @@ def hitl_node(state: AutoCIMState) -> Dict[str, Any]:
             "target_latency_ms": state.get("target_latency_ms"),
         }
     )
+
+    if isinstance(human_input, dict) and human_input.get("conclude_with_best"):
+        # Skips @precision_verifier deliberately -- this candidate was never
+        # judged converged by @evaluator's real target check in the first
+        # place, so there's nothing for the (expensive) precise re-check to
+        # confirm; it would only cost a real NeuroSim/CACTI call to
+        # re-verify a candidate everyone already knows didn't meet target.
+        return {
+            "human_overrides": {},
+            "needs_hitl": False,
+            "is_converged": True,
+            "low_confidence_conclusion": True,
+        }
 
     new_overrides = human_input.get("new_bounds", {}) if isinstance(human_input, dict) else {}
 
