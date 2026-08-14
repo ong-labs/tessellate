@@ -57,6 +57,13 @@ call:
   `propose_stage_candidates_via_surrogate`'s NSGA-II search over the
   surrogate's predictions of *not-yet-evaluated* candidates above.
 
+- `propose_stage_candidate_random`/`propose_stage_candidate_single_objective`:
+  ablation baselines (`tools/run_ablation.py`, `state.py`'s `search_strategy`)
+  -- "no search at all" and "the prior single-objective acquisition this
+  project actually shipped", respectively, so the current multi-objective
+  NSGA-II acquisition can be compared against concrete alternatives, not
+  just asserted to be better.
+
 @planner still makes the final call via forced tool-calling
 (nodes/planner.py) -- this module produces the statistically-grounded
 suggestion the LLM prompt is anchored to, not a replacement for it.
@@ -66,7 +73,7 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from pymoo.algorithms.moo.nsga2 import NSGA2
@@ -393,6 +400,59 @@ class _SurrogateMultiObjectiveProblem(Problem):
         out["F"] = f
 
 
+def propose_stage_candidate_random(
+    stage_names: Sequence[str], bit_bounds: Bounds, pruning_bounds: Bounds, seed: int
+) -> StagePoint:
+    """Random-search ablation baseline (`tools/run_ablation.py`): ignores
+    `history` entirely, uniform-random within bounds every call -- no
+    surrogate, no acquisition rule, just "try something valid." The floor
+    a real acquisition strategy (single- or multi-objective surrogate-
+    guided) needs to actually beat for "the search helps" to be a
+    demonstrated claim rather than an assumed one."""
+    rng = random.Random(seed)
+    return [(rng.uniform(*bit_bounds), rng.uniform(*pruning_bounds)) for _ in stage_names]
+
+
+def propose_stage_candidate_single_objective(
+    history: Sequence[Dict[str, Any]],
+    stage_names: Sequence[str],
+    bit_bounds: Bounds,
+    pruning_bounds: Bounds,
+    seed: int,
+    n_candidates: int = 200,
+    exploration_weight: float = 0.3,
+) -> StagePoint:
+    """Single-objective ablation baseline (`tools/run_ablation.py`): the
+    acquisition rule this project actually shipped before the multi-
+    objective NSGA-II rewrite (this module's own docstring) --
+    `predict_accuracy_stages`'s IDW surrogate, accuracy only, energy/latency
+    left entirely out of the search itself (only ever used *after* the
+    fact by `compute_pareto_rank`). That prior version was confirmed in
+    production to plateau at the best warm-up candidate's accuracy, with
+    nothing steering search toward the accuracy/energy/latency Pareto
+    front -- this function reproduces that same single-objective behavior
+    on demand, deliberately, so the current multi-objective version can be
+    compared against it rather than only against its own history.
+
+    UCB over `n_candidates` random points, not a grid: `propose_via_surrogate`'s
+    2D version can afford a `grid_size x grid_size` grid, but a grid is
+    infeasible once `2 * n_stages` climbs past a handful of dimensions
+    (resnet18 alone is already 12-dimensional). Real random sampling +
+    UCB selection is the same acquisition *rule* as the multi-objective
+    version's NSGA-II step, just without a population-based search over it."""
+    rng = random.Random(seed)
+    best_score = -math.inf
+    best_point: StagePoint = [(bit_bounds[0], pruning_bounds[0]) for _ in stage_names]
+    for _ in range(n_candidates):
+        point = [(rng.uniform(*bit_bounds), rng.uniform(*pruning_bounds)) for _ in stage_names]
+        predicted, uncertainty = predict_accuracy_stages(point, history, stage_names, bit_bounds, pruning_bounds)
+        score = predicted + exploration_weight * uncertainty
+        if score > best_score:
+            best_score = score
+            best_point = point
+    return best_point
+
+
 def propose_stage_candidates_via_surrogate(
     history: Sequence[Dict[str, Any]],
     stage_names: Sequence[str],
@@ -452,3 +512,44 @@ def compute_pareto_rank(candidate: Dict[str, Any], history: Sequence[Dict[str, A
     if not dominating:
         return 1
     return 1 + max(entry.get("pareto_rank", 1) for entry in dominating)
+
+
+def best_known_candidate(
+    candidate_history: Sequence[Dict[str, Any]], session_is_converged: bool = False
+) -> Optional[Dict[str, Any]]:
+    """The candidate a caller should treat as this session's answer.
+
+    `session_is_converged=True` means `candidate_history[-1]` is the entry
+    that actually made @evaluator/@precision_verifier set `is_converged`
+    True by meeting every configured target -- the graph stops immediately
+    after that iteration, so nothing gets appended afterward, and that last
+    entry is trustworthy by construction. `False` (including the
+    `low_confidence_conclusion` case -- see state.py's field docstring)
+    means no entry is known to have met the targets, so this returns the
+    highest-accuracy attempt across the *entire* history instead -- a
+    session that never converged, or gave up via hitl_node's
+    conclude-with-best path, still has a real "best it found" worth
+    reporting, not just whatever its last (likely failing) iteration was.
+
+    Callers must pass `session_is_converged` as `state["is_converged"] and
+    not state.get("low_confidence_conclusion")`, never `state["is_converged"]`
+    alone -- hitl_node's low-confidence path also sets `is_converged=True`
+    (so @evaluator_router still routes to `Converged (Done)` / `END`), but
+    its `candidate_history[-1]` is whatever the last, likely-failing search
+    iteration happened to produce, not the selected answer.
+
+    Originally `tools/repeat_search.py`'s private `_best_candidate` (moved
+    here so every consumer that has to answer "which candidate was this
+    session's answer" selects the same way instead of duplicating or
+    silently diverging: `main.py`'s `print_final_state`,
+    `tools/repeat_search.py`, and `tools/optuna_compare.py`). Note that
+    `nodes/hitl.py` is deliberately *not* one of them -- its
+    conclude-with-best path only records the `low_confidence_conclusion`
+    flag on state, leaving the actual selection to these reporting
+    consumers, so no candidate is ever picked twice by two different
+    rules."""
+    if session_is_converged and candidate_history:
+        return candidate_history[-1]
+    if candidate_history:
+        return max(candidate_history, key=lambda c: c.get("accuracy") or 0.0)
+    return None
