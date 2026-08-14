@@ -27,12 +27,25 @@ Scope, stated plainly:
   CI/dev machines don't (docs/coding_guidelines.md 5.C). `get_qat_backend`'s cached
   `base_model`/loaders stay on CPU regardless -- only the per-trial deep
   copy moves, so the shared cache is never pinned to one device.
-- `_MODEL_REGISTRY` has three entries: "resnet18" (torchvision, CNN),
-  "mobilenet_v2" (torchvision, depthwise-separable CNN), and "vit_tiny"
-  (timm's `vit_tiny_patch16_224`, transformer) -- all ImageNet-pretrained,
-  final classifier head replaced for CIFAR10's 10 classes. Extending to
-  further `model_id`s is adding a registry entry, not touching call sites
-  (docs/coding_guidelines.md 5.C "Model Agnostic").
+- `_MODEL_REGISTRY` ships three built-in entries: "resnet18" (torchvision,
+  CNN), "mobilenet_v2" (torchvision, depthwise-separable CNN), and
+  "vit_tiny" (timm's `vit_tiny_patch16_224`, transformer) -- all
+  ImageNet-pretrained, final classifier head replaced for the loaded
+  dataset's real class count (see `_DATASET_REGISTRY` below, not a fixed
+  10 anymore). Any other `model_id` is resolved two ways, in order:
+  `register_model(model_id, builder)` at runtime, or -- with zero changes
+  to this file -- a `"module.path:function_name"` import spec (a
+  caller's own architecture, defined in their own module) matching
+  `Callable[[int], nn.Module]`, same contract as the built-ins
+  (docs/coding_guidelines.md 5.C "Model Agnostic": arbitrary `nn.Module` support, not
+  just three hardcoded names).
+- Datasets are the same two-tier story via `_DATASET_REGISTRY`: the
+  built-in `"cifar10"` (default when `dataset_id` is omitted), a
+  `register_dataset(dataset_id, loader)` runtime hook, or a
+  `"module.path:function_name"` spec resolving to a zero-argument
+  `Callable[[], (train_loader, val_loader, test_loader, num_classes)]`
+  -- a deployment's real target dataset (ImageNet, a proprietary
+  dataset, ...) plugs in the same way, entirely outside this repo.
 - Hardware-mapping honesty: a CIM crossbar is fundamentally a dense
   matrix-vector multiply engine. ViT/DeiT's attention (qkv/proj) and MLP
   (fc1/fc2) layers are *all* dense `Linear` ops -- a natural fit. MobileNetV2's
@@ -44,11 +57,15 @@ Scope, stated plainly:
   first-cut multi-architecture coverage) -- `tools/cim_physics.py`'s
   mapper/profiler modeling depthwise vs. dense MACs differently would be a
   real follow-up, not attempted here.
-- Fine-tuning/eval default to a fixed CIFAR10 subset (not the full 50k/10k
-  images), so a QAT trial completes in CPU time by default -- an explicit,
+- Fine-tuning/eval default (`dataset_id` omitted) to a fixed CIFAR10 subset
+  (not the full 50k/10k images), so a QAT trial completes in CPU time by
+  default -- an explicit,
   approved scope decision, not a hidden shortcut, and one a deployment can
   widen (up to the full split) via `AUTOCIM_QAT_TRAIN_SIZE`/`_VAL_SIZE`/
-  `_TEST_SIZE`/`_BATCH_SIZE` without a code change (docs/coding_guidelines.md 5.C). Whatever
+  `_TEST_SIZE`/`_BATCH_SIZE`, or train for longer per candidate via
+  `AUTOCIM_QAT_MAX_EPOCHS` (`resolve_max_epochs`, the single source of truth
+  `nodes/tuner.py`/`tools/batch_warmup.py` both call), without a code
+  change (docs/coding_guidelines.md 5.C). Whatever
   the configured sizes, `_DEFAULT_TRAIN_SIZE`/`_VAL_SIZE`/`_TEST_SIZE` are a
   genuine three-way split (see `QATBackend`'s docstring): training and
   early-stopping never touch the test set that `run_qat_tuning`
@@ -75,6 +92,7 @@ a dataset/checkpoint or trains on real data.
 from __future__ import annotations
 
 import copy
+import importlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -355,6 +373,7 @@ def run_qat_tuning(
     early_stopping_patience: Optional[int] = None,
     device: Optional[str] = None,
     adc_bits: Optional[int] = None,
+    seed: Optional[int] = None,
 ) -> Dict[str, float]:
     """Real QAT trial for one candidate config: deep-copies `backend`'s base
     model (so each candidate starts from the same pretrained weights, never
@@ -370,7 +389,23 @@ def run_qat_tuning(
     stopping), and returns real measured accuracy on `backend.test_loader`
     -- touched exactly once, after every training/early-stopping decision is
     already final, so the reported number isn't leaked into those decisions.
+
+    `seed`, if given, seeds torch's global RNG right before training starts
+    -- `backend.base_model`'s own weights are deterministic (a cached,
+    already-initialized instance, deep-copied unchanged every call), so the
+    only real per-trial stochasticity this can reach is `train_loader`'s
+    batch shuffling and any dropout in the architecture. Without a seed
+    (`None`, the default -- unchanged behavior for any existing caller),
+    that stochasticity is genuinely random every call, so even the exact
+    same `stage_configs` on the exact same candidate can't be reproduced
+    -- `ExecutionContext.run_seed` (schemas/config.py) is the intended
+    source, threaded in by `tools/simulators.py`'s `tuner_tool`.
     """
+    if seed is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     resolved_device = _resolve_device(device)
     model = copy.deepcopy(backend.base_model).to(resolved_device)
     apply_crossbar_quant_prune(model, stage_configs, default_config, adc_bits)
@@ -432,26 +467,82 @@ _MODEL_REGISTRY: Dict[str, Callable[[int], nn.Module]] = {
     "vit_tiny": _build_vit_tiny,
 }
 
-_NUM_CLASSES = 10  # CIFAR10
+# Structural-only default: only used to build a throwaway instance for
+# get_layer_groups() when no real dataset (and thus no real num_classes)
+# is in play yet -- a classifier head's output width never changes a
+# module's *name*, which is all group_quantizable_layers reads. A real
+# get_qat_backend() call always overrides this with the loaded dataset's
+# actual num_classes (_DATASET_REGISTRY below), never this constant.
+_NUM_CLASSES = 10
 
-_model_cache: Dict[str, nn.Module] = {}
+_model_cache: Dict[Tuple[str, int], nn.Module] = {}
 
 
-def _get_base_model(model_id: str) -> nn.Module:
+def register_model(model_id: str, builder: Callable[[int], nn.Module]) -> None:
+    """Registers a custom architecture under `model_id` at runtime, so
+    `--model-id model_id` builds it exactly like one of the three
+    built-ins -- `builder(num_classes) -> nn.Module`, same contract every
+    `_build_*` function above follows. The "module.path:function_name"
+    spec `_resolve_model_builder` also accepts below is the zero-code-change
+    alternative to calling this directly."""
+    _MODEL_REGISTRY[model_id] = builder
+
+
+def _import_callable(spec: str, *, kind: str) -> Callable:
+    """Resolves a `"module.path:attr_name"` spec to the callable it names
+    -- shared by `_resolve_model_builder`/`_resolve_dataset_loader` below,
+    the two places this project lets a caller plug in their own code
+    without editing this file (docs/coding_guidelines.md 5.C). `kind` ("model"/"dataset")
+    only shapes the error message."""
+    module_path, sep, attr_name = spec.rpartition(":")
+    if not sep or not module_path or not attr_name:
+        raise ValueError(f"Malformed {kind} spec {spec!r}; expected 'module.path:function_name'")
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as exc:
+        raise ValueError(f"Could not import module {module_path!r} for {kind} spec {spec!r}: {exc}") from exc
+    try:
+        return getattr(module, attr_name)
+    except AttributeError as exc:
+        raise ValueError(f"Module {module_path!r} has no attribute {attr_name!r} for {kind} spec {spec!r}") from exc
+
+
+def _resolve_model_builder(model_id: str) -> Callable[[int], nn.Module]:
+    """`model_id` is either a name already in `_MODEL_REGISTRY` (the three
+    built-ins, or anything `register_model` added), or a
+    `"module.path:function_name"` import spec resolved via
+    `_import_callable` -- a caller's own architecture needs zero changes
+    to this repo to plug in."""
+    if model_id in _MODEL_REGISTRY:
+        return _MODEL_REGISTRY[model_id]
+    if ":" in model_id:
+        return _import_callable(model_id, kind="model")
+    raise ValueError(
+        f"No QAT backend registered for model_id={model_id!r}; supported built-ins: "
+        f"{list(_MODEL_REGISTRY)}, or pass a 'module.path:function_name' custom spec"
+    )
+
+
+def _get_base_model(model_id: str, num_classes: int = _NUM_CLASSES) -> nn.Module:
     """Just the model architecture (no dataset) -- cached separately from
     `get_qat_backend` so `get_layer_groups` (which @planner calls to learn
-    real stage names) never has to pay CIFAR10's download/load cost."""
-    if model_id not in _MODEL_REGISTRY:
-        raise ValueError(f"No QAT backend registered for model_id={model_id!r}; supported: {list(_MODEL_REGISTRY)}")
-    if model_id not in _model_cache:
-        _model_cache[model_id] = _MODEL_REGISTRY[model_id](_NUM_CLASSES)
-    return _model_cache[model_id]
+    real stage names) never has to pay a dataset's download/load cost.
+    Cached per `(model_id, num_classes)` since a different num_classes is
+    a genuinely different classifier-head shape, not an interchangeable
+    instance."""
+    cache_key = (model_id, num_classes)
+    if cache_key not in _model_cache:
+        _model_cache[cache_key] = _resolve_model_builder(model_id)(num_classes)
+    return _model_cache[cache_key]
 
 
-def get_layer_groups(model_id: str) -> Dict[str, List[str]]:
+def get_layer_groups(model_id: str, num_classes: int = _NUM_CLASSES) -> Dict[str, List[str]]:
     """Real per-stage layer names for `model_id`, for @planner to propose
-    per-stage `layer_configs` against (nodes/planner.py)."""
-    return group_quantizable_layers(_get_base_model(model_id))
+    per-stage `layer_configs` against (nodes/planner.py). `num_classes`
+    only affects the throwaway instance's head shape, never the stage
+    names this returns -- the default is fine for callers (like @planner)
+    that only need structure, before any real dataset has been chosen."""
+    return group_quantizable_layers(_get_base_model(model_id, num_classes))
 
 
 # Fine-tuning set (backward pass -- the per-QAT-trial cost driver), the
@@ -482,12 +573,14 @@ _VAL_SIZE_ENV = "AUTOCIM_QAT_VAL_SIZE"
 _TEST_SIZE_ENV = "AUTOCIM_QAT_TEST_SIZE"
 _BATCH_SIZE_ENV = "AUTOCIM_QAT_BATCH_SIZE"
 _SEED_ENV = "AUTOCIM_QAT_SEED"
+_MAX_EPOCHS_ENV = "AUTOCIM_QAT_MAX_EPOCHS"
 
 _DEFAULT_TRAIN_SIZE = 512
 _DEFAULT_VAL_SIZE = 128
 _DEFAULT_TEST_SIZE = 1000
 _DEFAULT_BATCH_SIZE = 32
 _DEFAULT_DATASET_SEED = 0
+_DEFAULT_MAX_EPOCHS = 5
 
 _FULL_SPLIT = "full"
 
@@ -514,6 +607,22 @@ def _resolve_int_env(env_var: str, default: int) -> int:
     except ValueError:
         return default
     return value if value > 0 else default
+
+
+def resolve_max_epochs() -> int:
+    """`AUTOCIM_QAT_MAX_EPOCHS` (same env-var-overridable pattern as
+    `AUTOCIM_QAT_TRAIN_SIZE`/etc. above), defaulting to `_DEFAULT_MAX_EPOCHS`
+    -- the single source of truth `nodes/tuner.py` and
+    `tools/batch_warmup.py` both call instead of each keeping their own
+    hardcoded `_DEFAULT_MAX_EPOCHS` constant "in lockstep" (a real
+    duplication risk: nothing enforced the two copies actually staying
+    equal, and only one of them updating silently would make the
+    sequential graph loop and the parallel warm-up batch train real
+    candidates for different numbers of epochs without either caller
+    knowing). Widening this multiplies every real QAT trial's wall-clock
+    linearly -- the same caller's tradeoff to make as `AUTOCIM_QAT_TRAIN_SIZE`,
+    not silently defaulted for them."""
+    return _resolve_int_env(_MAX_EPOCHS_ENV, _DEFAULT_MAX_EPOCHS)
 
 
 def _resolve_split_sizes(
@@ -585,34 +694,77 @@ def _build_cifar10_loaders(
     return train_loader, val_loader, test_loader
 
 
-_backend_cache: Dict[str, QATBackend] = {}
+DatasetLoader = Callable[[], Tuple[DataLoader, DataLoader, DataLoader, int]]
+
+_DEFAULT_DATASET_ID = "cifar10"
 
 
-def get_qat_backend(model_id: str) -> QATBackend:
-    """Real backend, cached per `model_id` for the life of the process (the
-    ~44MB pretrained-weight download and ~170MB CIFAR10 download only
-    happen once; both cache to disk under `.cache/` after that). Each
-    `run_qat_tuning` call still deep-copies `base_model` before mutating,
-    so the cached instance itself is never fine-tuned in place. Dataset
-    scope (train/val/test/batch size) is read from `AUTOCIM_QAT_*` env vars
-    at call time (see the block above), not baked in at import time, so
-    tests that set them via `monkeypatch.setenv` before the first call for
-    a given `model_id` take effect."""
-    if model_id not in _backend_cache:
-        base_model = _get_base_model(model_id)
-        train_loader, val_loader, test_loader = _build_cifar10_loaders(
-            train_size=_resolve_size_env(_TRAIN_SIZE_ENV, _DEFAULT_TRAIN_SIZE, allow_full=True),
-            val_size=_resolve_int_env(_VAL_SIZE_ENV, _DEFAULT_VAL_SIZE),
-            test_size=_resolve_size_env(_TEST_SIZE_ENV, _DEFAULT_TEST_SIZE, allow_full=True),
-            batch_size=_resolve_int_env(_BATCH_SIZE_ENV, _DEFAULT_BATCH_SIZE),
-            seed=_resolve_int_env(_SEED_ENV, _DEFAULT_DATASET_SEED),
-        )
-        _backend_cache[model_id] = QATBackend(
+def _load_cifar10() -> Tuple[DataLoader, DataLoader, DataLoader, int]:
+    """The built-in `"cifar10"` dataset loader -- same env-var-driven
+    sizing as always (`AUTOCIM_QAT_*`, resolved at call time so
+    `monkeypatch.setenv` before the first call still takes effect), now
+    behind the same zero-argument `DatasetLoader` contract every custom
+    dataset (`register_dataset`/a `"module:function"` spec) follows."""
+    train_loader, val_loader, test_loader = _build_cifar10_loaders(
+        train_size=_resolve_size_env(_TRAIN_SIZE_ENV, _DEFAULT_TRAIN_SIZE, allow_full=True),
+        val_size=_resolve_int_env(_VAL_SIZE_ENV, _DEFAULT_VAL_SIZE),
+        test_size=_resolve_size_env(_TEST_SIZE_ENV, _DEFAULT_TEST_SIZE, allow_full=True),
+        batch_size=_resolve_int_env(_BATCH_SIZE_ENV, _DEFAULT_BATCH_SIZE),
+        seed=_resolve_int_env(_SEED_ENV, _DEFAULT_DATASET_SEED),
+    )
+    return train_loader, val_loader, test_loader, _NUM_CLASSES
+
+
+_DATASET_REGISTRY: Dict[str, DatasetLoader] = {_DEFAULT_DATASET_ID: _load_cifar10}
+
+
+def register_dataset(dataset_id: str, loader: DatasetLoader) -> None:
+    """Registers a custom dataset loader under `dataset_id` at runtime --
+    `loader()` takes no arguments and returns `(train_loader, val_loader,
+    test_loader, num_classes)`, the same three-disjoint-split contract
+    `_load_cifar10` follows. Lets a deployment point `--dataset-id` at its
+    own real target dataset (ImageNet, a proprietary dataset, ...) without
+    editing this file -- the dataset's own module owns whatever
+    slicing/sizing logic it needs; nothing here assumes CIFAR10's
+    env-var-driven sizing is universal. The "module.path:function_name"
+    spec `_resolve_dataset_loader` also accepts below is the
+    zero-code-change alternative to calling this directly."""
+    _DATASET_REGISTRY[dataset_id] = loader
+
+
+def _resolve_dataset_loader(dataset_id: str) -> DatasetLoader:
+    if dataset_id in _DATASET_REGISTRY:
+        return _DATASET_REGISTRY[dataset_id]
+    if ":" in dataset_id:
+        return _import_callable(dataset_id, kind="dataset")
+    raise ValueError(
+        f"No dataset loader registered for dataset_id={dataset_id!r}; supported built-ins: "
+        f"{list(_DATASET_REGISTRY)}, or pass a 'module.path:function_name' custom spec"
+    )
+
+
+_backend_cache: Dict[Tuple[str, str], QATBackend] = {}
+
+
+def get_qat_backend(model_id: str, dataset_id: Optional[str] = None) -> QATBackend:
+    """Real backend, cached per `(model_id, dataset_id)` for the life of the
+    process (the ~44MB pretrained-weight download and ~170MB CIFAR10
+    download only happen once; both cache to disk under `.cache/` after
+    that). Each `run_qat_tuning` call still deep-copies `base_model` before
+    mutating, so the cached instance itself is never fine-tuned in place.
+    `dataset_id=None` (the default) resolves to `"cifar10"` -- unchanged
+    behavior for any existing caller that doesn't pass one."""
+    resolved_dataset_id = dataset_id or _DEFAULT_DATASET_ID
+    cache_key = (model_id, resolved_dataset_id)
+    if cache_key not in _backend_cache:
+        train_loader, val_loader, test_loader, num_classes = _resolve_dataset_loader(resolved_dataset_id)()
+        base_model = _get_base_model(model_id, num_classes)
+        _backend_cache[cache_key] = QATBackend(
             base_model=base_model,
             train_loader=train_loader,
             val_loader=val_loader,
             test_loader=test_loader,
-            num_classes=_NUM_CLASSES,
+            num_classes=num_classes,
             layer_groups=group_quantizable_layers(base_model),
         )
-    return _backend_cache[model_id]
+    return _backend_cache[cache_key]
