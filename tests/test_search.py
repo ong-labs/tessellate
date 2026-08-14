@@ -14,6 +14,8 @@ from tools.search import (
     predict_accuracy_stages,
     predict_energy_stages,
     predict_latency_stages,
+    propose_stage_candidate_random,
+    propose_stage_candidate_single_objective,
     propose_stage_candidates_via_surrogate,
     propose_via_surrogate,
     warmup_candidate,
@@ -342,3 +344,55 @@ def test_pareto_rank_builds_on_the_dominating_entrys_own_rank():
     # dominated by the rank-2 entry (and transitively the rank-1 one)
     candidate = _candidate(accuracy=0.6, energy_pj=6.0, noc_latency_ms=2.0)
     assert compute_pareto_rank(candidate, history) == 3
+
+
+# --- Ablation baselines (tools/run_ablation.py, state.py's search_strategy) -
+
+
+STAGE_NAMES = ["stage_a", "stage_b", "stage_c"]
+
+
+def test_random_baseline_stays_within_bounds():
+    point = propose_stage_candidate_random(STAGE_NAMES, BIT_BOUNDS, PRUNING_BOUNDS, seed=1)
+    assert len(point) == len(STAGE_NAMES)
+    for bits, pruning in point:
+        assert BIT_BOUNDS[0] <= bits <= BIT_BOUNDS[1]
+        assert PRUNING_BOUNDS[0] <= pruning <= PRUNING_BOUNDS[1]
+
+
+def test_random_baseline_is_deterministic_given_same_seed():
+    a = propose_stage_candidate_random(STAGE_NAMES, BIT_BOUNDS, PRUNING_BOUNDS, seed=42)
+    b = propose_stage_candidate_random(STAGE_NAMES, BIT_BOUNDS, PRUNING_BOUNDS, seed=42)
+    assert a == b
+
+
+def test_single_objective_baseline_stays_within_bounds():
+    point = propose_stage_candidate_single_objective(
+        [], STAGE_NAMES, BIT_BOUNDS, PRUNING_BOUNDS, seed=3, n_candidates=20
+    )
+    assert len(point) == len(STAGE_NAMES)
+    for bits, pruning in point:
+        assert BIT_BOUNDS[0] <= bits <= BIT_BOUNDS[1]
+        assert PRUNING_BOUNDS[0] <= pruning <= PRUNING_BOUNDS[1]
+
+
+def test_single_objective_baseline_favors_high_accuracy_region_of_history():
+    # IDW with a *single* history point predicts that same value
+    # everywhere (the weighted average of one term is just that term,
+    # regardless of distance) -- no spatial gradient at all. Two
+    # contrasting points (one good corner, one bad corner) are needed for
+    # "closer to the good point scores higher" to actually be a property
+    # of the surrogate, the thing this test means to check.
+    good_layer_configs = [{"layer_name": n, "weight_bits": 8, "column_pruning_ratio": 0.0} for n in STAGE_NAMES]
+    bad_layer_configs = [{"layer_name": n, "weight_bits": 2, "column_pruning_ratio": 0.5} for n in STAGE_NAMES]
+    history = [
+        {"avg_weight_bits": 8, "avg_column_pruning_ratio": 0.0, "accuracy": 0.95, "layer_configs": good_layer_configs},
+        {"avg_weight_bits": 2, "avg_column_pruning_ratio": 0.5, "accuracy": 0.1, "layer_configs": bad_layer_configs},
+    ]
+    point = propose_stage_candidate_single_objective(
+        history, STAGE_NAMES, BIT_BOUNDS, PRUNING_BOUNDS, seed=11, n_candidates=200, exploration_weight=0.0
+    )
+    avg_bits = sum(bits for bits, _ in point) / len(point)
+    avg_pruning = sum(pruning for _, pruning in point) / len(point)
+    assert avg_bits > 5.0  # closer to the 8-bit high-accuracy corner than to bit_bounds' midpoint (5)
+    assert avg_pruning < 0.25  # closer to the 0.0-pruning high-accuracy corner than to pruning_bounds' midpoint
