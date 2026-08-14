@@ -34,6 +34,24 @@ numpy==2.5.1
 # multi-objective algorithm over extending the old single-objective
 # (accuracy-only) UCB scan by hand.
 pymoo==0.6.2
+# tools/optuna_compare.py: this project's own search vs a well-established,
+# widely-used general-purpose optimizer, both on the identical real QAT+
+# physics pipeline -- roadmap Step 1.5 toward validating whether this
+# project's hand-built acquisition earns its keep. Optuna's own multi-
+# objective NSGA-II sampler runs directly against real evaluations (no
+# surrogate phase), unlike pymoo's role above (searching over the IDW
+# surrogate's predictions, not real trials) -- see that module's docstring.
+optuna==4.9.0
+# tools/precision_check.py's real ADC energy model (Stage-2 verification,
+# docs/coding_guidelines.md 5.D "Mock First" graduating in place) -- pure Python, literature-
+# fit against real published ADC designs (arXiv:2404.06553). hwcomponents-
+# neurosim/-cacti (the fuller alternatives) were evaluated and rejected:
+# -neurosim compiles NeuroSim's real C++ source via make/g++ at install
+# time (no C++ toolchain assumed here), -cacti imports the POSIX-only
+# `fcntl` module (doesn't load on Windows) -- see tools/precision_check.py's
+# module docstring for the full reasoning.
+hwcomponents==1.0.114
+hwcomponents-adc==1.0.21
 langchain==1.3.14
 # Default AUTOCIM_PLANNER_MODEL provider (llm.py) -- planner runs against a
 # local Ollama model unless AUTOCIM_PLANNER_MODEL is set to a cloud spec, so
