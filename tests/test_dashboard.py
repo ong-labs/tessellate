@@ -3,8 +3,10 @@ planner_decisions (why it was tried) and llm_usage (real LLM cost) into a
 self-contained HTML report -- a pure function of AutoCIMState, no I/O, so
 tested purely against synthetic state (state_factory), no real graph run."""
 
+import re
+
 from graph import build_graph
-from tools.dashboard import render_dashboard_html
+from tools.dashboard import _svg_pareto_chart, render_dashboard_html
 
 _PLANNER_DECISIONS = [
     {"iteration": 1, "search_tag": "LHS warm-up candidate 1/3", "used_llm": True, "rationale": "exploring the space"},
@@ -230,3 +232,84 @@ def test_dashboard_renders_from_a_real_stubbed_graph_run(state_factory, register
     # entry, so its search_tag/rationale must show up in the rendered table
     for decision in result["planner_decisions"]:
         assert decision["search_tag"] in output
+
+
+# --- Pareto chart: warm-up vs search-phase rendering ------------------------
+
+
+def _chart_rows():
+    """4 LHS warm-up samples + 2 surrogate-guided search candidates."""
+    rows = []
+    for i in range(1, 5):
+        rows.append(
+            {
+                "iteration": i,
+                "accuracy": 0.60 + i * 0.02,
+                "energy_pj": 1_600_000 + i * 50_000,
+                "pareto_rank": 1,
+                "search_tag": f"LHS warm-up candidate {i}/4",
+            }
+        )
+    for i in (5, 6):
+        rows.append(
+            {
+                "iteration": i,
+                "accuracy": 0.80 + i * 0.01,
+                "energy_pj": 1_700_000 + i * 10_000,
+                "pareto_rank": 1,
+                "search_tag": "surrogate-model acquisition over 4 prior candidates",
+            }
+        )
+    return rows
+
+
+def test_pareto_chart_connects_only_search_phase_points():
+    """LHS warm-up samples have no meaningful order between them, so joining
+    them by iteration index draws noise: on a real 18-candidate session the
+    polyline ran 3401px across a 466px plot diagonal. Only the surrogate-
+    guided points -- which genuinely are a trajectory -- get the line."""
+    svg = _svg_pareto_chart(_chart_rows())
+
+    points = re.search(r'<polyline points="([^"]+)"', svg).group(1).split()
+    assert len(points) == 2  # the two search candidates, not all six
+
+
+def test_pareto_chart_omits_the_line_entirely_during_warm_up():
+    """A run still in warm-up has no trajectory to draw yet."""
+    warmup_only = [r for r in _chart_rows() if "warm-up" in r["search_tag"]]
+    assert "<polyline" not in _svg_pareto_chart(warmup_only)
+
+
+def test_pareto_chart_draws_warm_up_hollow_and_search_filled():
+    svg = _svg_pareto_chart(_chart_rows())
+
+    assert svg.count('r="3.5" fill="none"') == 4  # hollow warm-up marks
+    assert len(re.findall(r'r="5" fill="#', svg)) == 2  # filled search marks
+
+
+def test_pareto_chart_labels_search_points_but_not_warm_up_samples():
+    """An LHS sample's index carries no information, so printing it is
+    noise -- front membership is already carried by colour. Labelling every
+    point put 8 label pairs within 24px of each other on a real session."""
+    svg = _svg_pareto_chart(_chart_rows())
+
+    labelled = re.findall(r'font-size="10" fill="#c8d3e0">(\d+)</text>', svg)
+    assert sorted(int(n) for n in labelled) == [5, 6]
+
+
+def test_pareto_chart_prints_axis_end_values():
+    """Without them the axes carried no magnitude at all -- a reader could
+    not tell 1.6M pJ from 16 pJ."""
+    svg = _svg_pareto_chart(_chart_rows())
+
+    assert "1,650,000" in svg and "1,800,000" in svg  # energy min/max
+    assert "0.620" in svg and "0.860" in svg  # accuracy min/max
+
+
+def test_pareto_chart_scales_to_its_container():
+    """Fixed pixel width overflowed narrow viewports; the viewBox keeps the
+    aspect ratio while the element itself scales down."""
+    svg = _svg_pareto_chart(_chart_rows())
+
+    assert 'width="100%"' in svg
+    assert "viewBox=" in svg
