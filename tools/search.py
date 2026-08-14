@@ -17,7 +17,7 @@ call:
   real per-stage generalization. A candidate is one (weight_bits,
   column_pruning_ratio) pair *per real model stage*
   (`tools.qat.get_layer_groups`), so the search space is
-  `2 * len(stage_names)`-dimensional (12 for resnet18's 6 stages, up to 40
+  `2 * len(stage_names)`-dimensional (20 for resnet18's 10 stages, up to 40
   for mobilenet_v2's 20) instead of a fixed 2D point that
   `nodes/planner.py` used to fan out to every stage via one hardcoded
   edge-stage-bias rule. `warmup_stage_candidate` still uses real LHS (now
@@ -437,7 +437,7 @@ def propose_stage_candidate_single_objective(
     UCB over `n_candidates` random points, not a grid: `propose_via_surrogate`'s
     2D version can afford a `grid_size x grid_size` grid, but a grid is
     infeasible once `2 * n_stages` climbs past a handful of dimensions
-    (resnet18 alone is already 12-dimensional). Real random sampling +
+    (resnet18 alone is already 20-dimensional). Real random sampling +
     UCB selection is the same acquisition *rule* as the multi-objective
     version's NSGA-II step, just without a population-based search over it."""
     rng = random.Random(seed)
