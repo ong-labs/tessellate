@@ -545,6 +545,61 @@ def get_layer_groups(model_id: str, num_classes: int = _NUM_CLASSES) -> Dict[str
     return group_quantizable_layers(_get_base_model(model_id, num_classes))
 
 
+def _weight_matrix_shape(module: nn.Module) -> Optional[Tuple[int, int, int]]:
+    """`(rows, cols, groups)` of the weight matrix `module` maps onto a
+    crossbar, or None if it isn't a mappable layer.
+
+    `rows` is the input-vector length one crossbar pass consumes and `cols`
+    the number of output channels it drives, following the standard
+    im2col/GEMM view of a conv every CIM mapping paper uses: an
+    `in_ch x k x k` patch is flattened down one column of rows, and each
+    output channel gets its own crossbar column. `groups` is `Conv2d.groups`
+    -- 1 for an ordinary dense/pointwise conv, `in_channels` for a depthwise
+    conv, whose weight matrix is block-diagonal rather than dense (see
+    `tools.cim_physics.crossbar_passes` for why that distinction changes the
+    real cost by an order of magnitude). `rows` is deliberately the
+    *per-group* input length (`in_channels // groups * k * k`), so a
+    depthwise layer reports the small block it actually computes, not the
+    dense matrix it would be if the zeros were stored."""
+    if isinstance(module, nn.Conv2d):
+        kernel_h, kernel_w = module.kernel_size
+        rows = (module.in_channels // module.groups) * kernel_h * kernel_w
+        return rows, module.out_channels, module.groups
+    if isinstance(module, nn.Linear):
+        return module.in_features, module.out_features, 1
+    return None
+
+
+def get_stage_weight_shapes(
+    model_id: str, num_classes: int = _NUM_CLASSES
+) -> Dict[str, List[Tuple[int, int, int]]]:
+    """Per-stage real weight-matrix shapes, keyed by the same stage names
+    `get_layer_groups` returns -- what `tools.cim_physics.simulate_cim_profile`
+    needs to charge a layer its *real* crossbar cost instead of assuming
+    every stage is exactly one full `crossbar_rows x crossbar_cols` array.
+
+    Each stage maps to the list of `(rows, cols, groups)` triples of the
+    real layers grouped under it, in `group_quantizable_layers` order. A
+    stage is a *group* of layers (resnet18's `layer4.1` alone holds two
+    3x3x512x512 convs), which is exactly why charging one array per stage
+    understated real cost by ~70x -- see that module's docstring.
+
+    Uses the same cached architecture instance as `get_layer_groups`, so
+    this costs one dict walk after the first call and never downloads a
+    dataset."""
+    model = _get_base_model(model_id, num_classes)
+    named = dict(model.named_modules())
+    shapes: Dict[str, List[Tuple[int, int, int]]] = {}
+    for stage, layer_names in group_quantizable_layers(model).items():
+        stage_shapes = []
+        for layer_name in layer_names:
+            shape = _weight_matrix_shape(named.get(layer_name))
+            if shape is not None:
+                stage_shapes.append(shape)
+        shapes[stage] = stage_shapes
+    return shapes
+
+
 # Fine-tuning set (backward pass -- the per-QAT-trial cost driver), the
 # early-stopping monitor (forward-only, evaluated once per epoch), and the
 # final-report set (forward-only, evaluated exactly once per trial no matter
