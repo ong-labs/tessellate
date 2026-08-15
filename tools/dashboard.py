@@ -354,15 +354,25 @@ def _svg_pareto_chart(
             shape = f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{color}" opacity="0.95">'
         marks.append(f"{shape}<title>{html.escape(tooltip)}</title></circle>")
         if not warmup or r["iteration"] == last_iteration:
-            lx, ly = cx + 8, cy + 4
+            lx, ly = cx + 10, cy + 4
             while any(abs(lx - px) < 20 and abs(ly - py) < 11 for px, py in placed_labels):
                 ly += 11
             placed_labels.append((lx, ly))
-            marks.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="10" fill="#c8d3e0">{r["iteration"]}</text>')
+            # paint-order=stroke draws a panel-coloured halo *behind* the
+            # glyphs: displaced labels land on the trajectory/staircase they
+            # were displaced away from, and a line running through a two-digit
+            # number at 10px makes it unreadable.
+            marks.append(
+                f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="10" fill="#c8d3e0" '
+                f'stroke="#111821" stroke-width="3" paint-order="stroke">{r["iteration"]}</text>'
+            )
 
     return (
         f'<svg viewBox="0 0 {width} {height}" width="100%" height="auto" '
-        f'style="max-width:{width}px" role="img" '
+        # Capped well above the viewBox width and centred: pinned to `width`
+        # the chart sat in the left half of a 1340px-wide panel with the rest
+        # blank, and every tick/label rendered at its minimum legible size.
+        f'style="max-width:{width * 1.35:.0f}px;display:block;margin:0 auto" role="img" '
         f'aria-label="energy vs accuracy per iteration; filled marks are surrogate-guided search '
         f'candidates joined in order, hollow marks are unordered LHS warm-up samples, '
         f'blue marks and the staircase are the energy-accuracy Pareto front, '
@@ -780,10 +790,10 @@ def _targets_section_html(state: AutoCIMState) -> str:
         )
 
     return (
-        '<table class="targets-table"><thead><tr>'
+        '<div class="table-scroll"><table class="targets-table"><thead><tr>'
         f'<th>{_bi("objective", "목적 지표")}</th><th>{_bi("target", "목표값")}</th>'
         f'<th>{_bi("best this run", "이번 실행 최고값")}</th><th>{_bi("verdict", "달성 여부")}</th>'
-        f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
         f'<p class="summary">{converged_line}</p>'
         f'<p class="summary">{_bi("Each best-this-run figure is the best value over all candidates for that "
                                  "objective alone, so the three can come from three different candidates. "
@@ -919,6 +929,11 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
   .warmup-details[open] > summary::before {{ content: "\\25BC  "; }}
   .warmup-details[open] > summary {{ color: var(--text); margin-bottom: 8px; }}
   table.warmup-inner-table {{ margin: 0; }}
+  /* An 8-column monospace table has a hard min-content width (~735px);
+     below that it used to push the whole page sideways, which is what a
+     reader sees as "the right edge is cut off" when zooming in. Scrolling
+     it inside its own box keeps the rest of the page in place. */
+  .table-scroll {{ overflow-x: auto; }}
   .panel {{ background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }}
   .panel-title {{
     font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
@@ -931,7 +946,10 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
     font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
     font-size: 13px; color: var(--text); text-align: right;
   }}
-  .spec-unset {{ color: #6c7a8c; font-style: italic; font-family: inherit; }}
+  /* No italic: Korean fonts ship no true italic, so the browser synthesises
+     a slanted face that renders smeared and noticeably harder to read than
+     the upright text around it. Colour alone carries "unset" here. */
+  .spec-unset {{ color: #6c7a8c; font-family: inherit; }}
   table.targets-table td:first-child {{ font-family: inherit; }}
   .verdict-ok {{ color: var(--green-text); font-family: inherit; }}
   .verdict-miss {{ color: var(--amber-text); font-family: inherit; }}
@@ -976,13 +994,14 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
 <h2>{_bi("Calibration / precision confidence", "캘리브레이션 / 정밀도 신뢰도")}</h2>
 {_calibration_section_html(state)}
 
-<h2>{_bi("Pareto front movement (energy vs accuracy, blue = current rank 1)", "파레토 프론트 변화 (에너지 vs 정확도, 파랑 = 현재 랭크 1)")}</h2>
+<h2>{_bi("Pareto front (energy vs. accuracy)", "파레토 프론트 (에너지 대비 정확도)")}</h2>
 <div class="panel">
 {_svg_pareto_chart(rows, chart_targets)}
 {_pareto_legend_html(has_targets)}
 </div>
 
 <h2>{_bi("Per-iteration candidates", "반복별 후보 목록")}</h2>
+<div class="table-scroll">
 <table>
 <thead><tr>
 <th>{_bi("iter", "반복")}</th>
@@ -998,6 +1017,7 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
 {_table_rows_html(rows)}
 </tbody>
 </table>
+</div>
 <script>
 function setDashboardLang(lang) {{
   document.querySelectorAll('[data-lang]').forEach(function (el) {{
