@@ -301,7 +301,7 @@ def test_pareto_chart_labels_search_points_but_not_warm_up_samples():
     point put 8 label pairs within 24px of each other on a real session."""
     svg = _svg_pareto_chart(_chart_rows())
 
-    labelled = re.findall(r'font-size="10" fill="#c8d3e0">(\d+)</text>', svg)
+    labelled = re.findall(r'fill="#c8d3e0"[^>]*>(\d+)</text>', svg)
     assert sorted(int(n) for n in labelled) == [5, 6]
 
 
