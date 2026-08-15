@@ -40,7 +40,7 @@ from pydantic import ValidationError
 
 from graph import build_graph
 from nodes.planner import SEARCH_STRATEGIES, search_bounds
-from middleware import register_hw_config
+from middleware import get_hw_config, register_hw_config
 from schemas.config import HWConfig, NoCTopology
 from state import AutoCIMState, merge_dicts
 from store import GlobalHWStore, ModelSpecificStore, SqliteLongTermStore
@@ -1403,11 +1403,21 @@ def write_dashboard(graph, config: Dict[str, Any], dashboard_out: Optional[str])
     wasn't requested (--dashboard-out). Called at every `run_session` exit
     point (paused or finished) so a researcher checking mid-run gets a
     report reflecting whatever iterations have actually completed, not only
-    a fully-converged run."""
+    a fully-converged run.
+
+    The resolved HWConfig is looked up from middleware's registry rather
+    than read out of state (state only carries `hw_spec_id`) so the report
+    can state the actual crossbar/ADC/NoC numbers every energy figure in it
+    depends on. A miss is not an error -- render the report without the
+    hardware panel rather than losing the whole report over a label."""
     if not dashboard_out:
         return
     state_values = graph.get_state(config).values
-    Path(dashboard_out).write_text(render_dashboard_html(state_values), encoding="utf-8")
+    try:
+        hw_config = get_hw_config(str(state_values.get("hw_spec_id")))
+    except RuntimeError:
+        hw_config = None
+    Path(dashboard_out).write_text(render_dashboard_html(state_values, hw_config), encoding="utf-8")
     print(f"[dashboard] wrote {dashboard_out}")
 
 
