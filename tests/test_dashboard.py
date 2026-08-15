@@ -6,7 +6,8 @@ tested purely against synthetic state (state_factory), no real graph run."""
 import re
 
 from graph import build_graph
-from tools.dashboard import _svg_pareto_chart, render_dashboard_html
+from schemas.config import HWConfig, NoCTopology
+from tools.dashboard import _pareto_front_2d, _svg_pareto_chart, render_dashboard_html
 
 _PLANNER_DECISIONS = [
     {"iteration": 1, "search_tag": "LHS warm-up candidate 1/3", "used_llm": True, "rationale": "exploring the space"},
@@ -274,10 +275,17 @@ def test_pareto_chart_connects_only_search_phase_points():
     assert len(points) == 2  # the two search candidates, not all six
 
 
-def test_pareto_chart_omits_the_line_entirely_during_warm_up():
-    """A run still in warm-up has no trajectory to draw yet."""
+def test_pareto_chart_omits_the_trajectory_entirely_during_warm_up():
+    """A run still in warm-up has no trajectory to draw yet. The Pareto
+    staircase (a different polyline, drawn in the front colour) is unrelated
+    and must still appear -- warm-up samples have a front from candidate
+    one."""
     warmup_only = [r for r in _chart_rows() if "warm-up" in r["search_tag"]]
-    assert "<polyline" not in _svg_pareto_chart(warmup_only)
+
+    svg = _svg_pareto_chart(warmup_only)
+
+    assert "#4a6b8a" not in svg  # the search-order trajectory
+    assert '<polyline points="' in svg and "#5b9dff" in svg  # the front staircase
 
 
 def test_pareto_chart_draws_warm_up_hollow_and_search_filled():
@@ -313,3 +321,162 @@ def test_pareto_chart_scales_to_its_container():
 
     assert 'width="100%"' in svg
     assert "viewBox=" in svg
+
+
+# --- Pareto chart: two-axis front, staircase, target reference lines --------
+
+
+def test_pareto_chart_front_is_over_the_two_plotted_axes_not_pareto_rank():
+    """Every row in _chart_rows() carries pareto_rank 1 (that rank is over
+    three objectives, and on a real session 13 of 18 candidates held it), so
+    colouring by it would mark all six points and show no front at all. The
+    chart's front is recomputed over energy/accuracy alone."""
+    front = _pareto_front_2d(_chart_rows())
+
+    assert [r["iteration"] for r in front] == [1, 2, 5, 6]
+    # iteration 3 ties iteration 5 on energy but is far less accurate, and
+    # iteration 4 costs the most while being beaten on accuracy by both.
+    assert {3, 4}.isdisjoint({r["iteration"] for r in front})
+
+
+def test_pareto_chart_draws_the_front_as_a_staircase():
+    """Tread then riser per step: the extra energy is paid first, then the
+    accuracy it buys -- 4 front points give 7 vertices, not 4."""
+    svg = _svg_pareto_chart(_chart_rows())
+
+    staircase = re.findall(r'<polyline points="([^"]+)" fill="none" stroke="#5b9dff"', svg)
+    assert len(staircase) == 1
+    assert len(staircase[0].split()) == 7
+
+
+def test_pareto_chart_draws_configured_targets_as_reference_lines():
+    svg = _svg_pareto_chart(_chart_rows(), {"accuracy": 0.75, "energy_pj": 1_700_000})
+
+    assert "target accuracy 0.750" in svg
+    assert "target energy 1,700,000" in svg
+    assert svg.count('stroke="#e0b354"') == 2
+
+
+def test_pareto_chart_extends_its_domain_so_a_nearby_target_stays_visible():
+    """A target just outside the measured range still has to be drawable --
+    otherwise "no candidate reached the bar" is invisible, which is the one
+    case a reader most needs to see."""
+    svg = _svg_pareto_chart(_chart_rows(), {"accuracy": 0.95})
+
+    assert "target accuracy 0.950" in svg
+    assert "0.950" in re.findall(r'text-anchor="end">([0-9.]+)</text>', svg)  # axis extended to it
+
+
+def test_pareto_chart_omits_a_target_that_is_nowhere_near_the_data():
+    """Widening the domain to reach an energy budget 100x below anything
+    measured would squash every real candidate into one pixel column. The
+    line is dropped instead; the targets table still reports the miss."""
+    svg = _svg_pareto_chart(_chart_rows(), {"energy_pj": 10_000})
+
+    assert "target energy" not in svg
+    assert "1,650,000" in svg  # the data's own domain is untouched
+
+
+# --- Run configuration and target sections ---------------------------------
+
+
+def test_run_configuration_section_reports_the_real_hardware_numbers(state_factory, good_hw_config):
+    """hw_spec_id alone is an opaque label -- a reader cannot tell an 8-bit
+    ADC from a 4-bit one, and every energy figure in the report depends on
+    it."""
+    output = render_dashboard_html(state_factory(run_seed=3), good_hw_config)
+
+    assert "128 &times; 128" in output
+    assert "8 bit / 4 bit" in output  # adc_bits / dac_bits
+    assert "mesh, 10 Gbps" in output
+    assert "0.001 &#8486;/&micro;m" in output  # wire_resistance_ohm_per_um
+    assert "64 KB" in output  # sram_buffer_kb
+    assert ">3<" in output  # run_seed, not the default 0
+
+
+def test_run_configuration_marks_unstated_hardware_fields_rather_than_inventing_them(state_factory):
+    """good_hw_config states no tech_node_nm/device_type -- a blank cell
+    would read as a bug and a made-up default would be worse (docs/coding_guidelines.md
+    5.C)."""
+    hw = HWConfig(
+        hw_spec_id="spec_without_optionals",
+        crossbar_rows=64,
+        crossbar_cols=64,
+        num_tiles=4,
+        adc_bits=6,
+        dac_bits=2,
+        noc_topology=NoCTopology.RING,
+        noc_link_bandwidth_gbps=5.0,
+    )
+
+    output = render_dashboard_html(state_factory(), hw)
+
+    assert output.count("미지정") == 5  # wire resistance, noise sigma, SRAM, tech node, device type
+
+
+def test_run_configuration_degrades_to_the_id_when_the_spec_cannot_be_resolved(state_factory):
+    """main.py's write_dashboard passes None when middleware's registry has
+    no entry -- that must cost the hardware panel, not the whole report."""
+    output = render_dashboard_html(state_factory(hw_spec_id="unregistered_spec"))
+
+    assert "unregistered_spec" in output
+    assert "실행 조건" in output
+    assert "크로스바 배열" not in output
+
+
+def test_targets_section_reports_target_best_and_verdict_per_objective(state_factory):
+    state = state_factory(
+        target_accuracy=0.8,
+        target_energy_pj=5.0,
+        candidate_history=_CANDIDATE_HISTORY,
+    )
+
+    output = render_dashboard_html(state)
+
+    assert "0.8000" in output  # the accuracy target
+    assert "0.9000" in output  # best accuracy measured (iteration 2)
+    assert "달성" in output
+    assert "설정 안 함 (수렴 판정 미적용)" in output  # target_latency_ms was never set
+
+
+def test_targets_section_flags_an_unmet_target(state_factory):
+    state = state_factory(target_accuracy=0.95, candidate_history=_CANDIDATE_HISTORY)
+
+    output = render_dashboard_html(state)
+
+    assert "미달성" in output
+
+
+def test_targets_section_names_the_candidate_that_met_everything_at_once(state_factory):
+    """The per-objective bests generally come from different candidates, so
+    reading them as one design point would overstate the result -- the
+    candidate that actually converged is called out separately."""
+    state = state_factory(target_accuracy=0.8, candidate_history=_CANDIDATE_HISTORY)
+
+    output = render_dashboard_html(state)
+
+    assert "설정된 목표를 동시에 모두 충족한 후보: iteration 2" in output
+
+
+def test_targets_section_says_so_when_nothing_has_converged(state_factory):
+    history = [{**c, "is_converged": False} for c in _CANDIDATE_HISTORY]
+
+    output = render_dashboard_html(state_factory(target_accuracy=0.99, candidate_history=history))
+
+    assert "설정된 목표를 동시에 모두 충족한 후보는 아직 없습니다." in output
+
+
+def test_latency_keeps_significant_digits_instead_of_collapsing_to_zero(state_factory):
+    """A real session's noc_latency_ms values span 0.000342-0.000432 ms.
+    Under a fixed {:.3f} every one printed as "0.000", reading as "latency
+    is zero" rather than "these differ by 26%"."""
+    history = [
+        {**_CANDIDATE_HISTORY[0], "noc_latency_ms": 0.000342},
+        {**_CANDIDATE_HISTORY[1], "noc_latency_ms": 0.000432},
+    ]
+
+    output = render_dashboard_html(state_factory(target_accuracy=0.8, candidate_history=history))
+
+    assert "0.000342" in output
+    assert "0.000432" in output
+    assert ">0.000<" not in output
