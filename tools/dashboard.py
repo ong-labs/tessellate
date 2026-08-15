@@ -21,9 +21,11 @@ this project's "no new heavy dependency" stance elsewhere (tools/search.py).
 from __future__ import annotations
 
 import html
+import math
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
+from schemas.config import HWConfig
 from state import AutoCIMState
 
 
@@ -135,10 +137,72 @@ def _is_warmup_row(row: Dict[str, Any]) -> bool:
     return bool(_WARMUP_TAG_RE.match(str(row.get("search_tag") or "")))
 
 
-def _svg_pareto_chart(rows: List[Dict[str, Any]], width: int = 660, height: int = 380, pad: int = 52) -> str:
+def _pareto_front_2d(plottable: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The non-dominated set on the two *plotted* axes alone (lower
+    energy_pj better, higher accuracy better), energy-ascending.
+
+    Deliberately not `pareto_rank`: that field is computed over three
+    objectives (accuracy, energy, latency), so on a real 18-candidate
+    session 13 candidates carried rank 1 -- colouring by it marked almost
+    everything, which is exactly the "front" a reader cannot see. Restricted
+    to the two axes actually on screen, the same session yields 6 points,
+    and they form a staircase a viewer can read off directly. The table
+    below still reports the real 3-objective `pareto_rank`; the legend says
+    so, since the two genuinely disagree and hiding that would be worse
+    than explaining it."""
+    front: List[Dict[str, Any]] = []
+    best_accuracy: Optional[float] = None
+    # -accuracy breaks energy ties in favour of the more accurate candidate,
+    # so the tied-but-worse one is correctly dropped by the strict >.
+    for row in sorted(plottable, key=lambda r: (r["energy_pj"], -r["accuracy"])):
+        if best_accuracy is None or row["accuracy"] > best_accuracy:
+            best_accuracy = row["accuracy"]
+            front.append(row)
+    return front
+
+
+def _axis_ticks(low: float, high: float, n: int = 4) -> List[float]:
+    return [low] if high == low else [low + (high - low) * i / (n - 1) for i in range(n)]
+
+
+def _extend_for_target(low: float, high: float, target: Optional[float]) -> Tuple[float, float]:
+    """Widens an axis domain so a target reference line lands inside the
+    plot -- but only when the target is at most one full data span outside
+    it. A target far away from everything measured (e.g. an energy budget
+    100x below any candidate) would otherwise squash every real point into
+    a single pixel column; in that case the domain is left alone and the
+    line is simply not drawn (`_svg_pareto_chart` range-checks before
+    emitting it), which is the honest rendering of "nothing on this chart
+    is anywhere near the target"."""
+    if target is None:
+        return low, high
+    span = high - low
+    slack = span if span > 0 else (abs(low) * 0.1 or 1.0)
+    if low - slack <= target <= high + slack:
+        return min(low, target), max(high, target)
+    return low, high
+
+
+def _svg_pareto_chart(
+    rows: List[Dict[str, Any]],
+    targets: Optional[Dict[str, Optional[float]]] = None,
+    width: int = 720,
+    height: int = 430,
+    pad: int = 58,
+) -> str:
     """energy_pj (x) vs accuracy (y, inverted so higher accuracy trends
-    upward), one point per iteration; points on the current Pareto front
-    (pareto_rank == 1) are highlighted.
+    upward), one point per iteration; points on the two-axis Pareto front
+    (`_pareto_front_2d`) are highlighted and joined by a staircase.
+
+    The staircase is the front's actual meaning made visible: each riser is
+    the extra energy a candidate has to pay to reach the next accuracy
+    level. Scattered highlighted dots stated the same data but left the
+    reader to trace the frontier by eye.
+
+    `targets` ({"accuracy": ..., "energy_pj": ...}, either key optional)
+    draws the run's configured convergence targets as dashed reference
+    lines, so "did any candidate actually clear the bar" is answerable from
+    the chart rather than only from the table.
 
     **The trajectory line covers the search phase only.** Warm-up points are
     Latin Hypercube samples -- deliberately spread across the space with no
@@ -172,8 +236,10 @@ def _svg_pareto_chart(rows: List[Dict[str, Any]], width: int = 660, height: int 
 
     accuracies = [r["accuracy"] for r in plottable]
     energies = [r["energy_pj"] for r in plottable]
-    acc_min, acc_max = min(accuracies), max(accuracies)
-    e_min, e_max = min(energies), max(energies)
+    targets = targets or {}
+    target_accuracy, target_energy = targets.get("accuracy"), targets.get("energy_pj")
+    acc_min, acc_max = _extend_for_target(min(accuracies), max(accuracies), target_accuracy)
+    e_min, e_max = _extend_for_target(min(energies), max(energies), target_energy)
 
     def x(energy: float) -> float:  # energy_pj increases left -> right
         if e_max == e_min:
@@ -188,57 +254,122 @@ def _svg_pareto_chart(rows: List[Dict[str, Any]], width: int = 660, height: int 
     ordered = sorted(plottable, key=lambda r: r["iteration"])
     searched = [r for r in ordered if not _is_warmup_row(r)]
     last_iteration = ordered[-1]["iteration"]
+    front_iterations = {r["iteration"] for r in _pareto_front_2d(plottable)}
 
-    # Plot frame + end-of-axis tick values: without them the axes carried no
-    # magnitude at all, so a reader could not tell 1.6M pJ from 16 pJ.
-    axis = (
+    # Plot frame + gridded tick values: without them the axes carried no
+    # magnitude at all (a reader could not tell 1.6M pJ from 16 pJ), and with
+    # only the two end values there was nothing to read an interior point
+    # against -- the gap between two candidates was eyeballed, not measured.
+    axis = [
         f'<rect x="{pad}" y="{pad}" width="{width - 2 * pad}" height="{height - 2 * pad}" '
         f'fill="none" stroke="#2b3a4a" stroke-width="1"/>'
-        f'<text x="{pad}" y="{height - pad + 16}" font-size="10" fill="#93a4b8" text-anchor="start">'
-        f"{e_min:,.0f}</text>"
-        f'<text x="{width - pad}" y="{height - pad + 16}" font-size="10" fill="#93a4b8" text-anchor="end">'
-        f"{e_max:,.0f}</text>"
-        f'<text x="{pad - 8}" y="{height - pad}" font-size="10" fill="#93a4b8" text-anchor="end">'
-        f"{acc_min:.3f}</text>"
-        f'<text x="{pad - 8}" y="{pad + 8}" font-size="10" fill="#93a4b8" text-anchor="end">{acc_max:.3f}</text>'
-    )
+    ]
+    energy_ticks = _axis_ticks(e_min, e_max)
+    for i, tick in enumerate(energy_ticks):
+        tx = x(tick)
+        # The end ticks are anchored inward: centred, the leftmost 7-digit
+        # energy value ran under the y-axis tick column (15px apart on a
+        # real session) and the rightmost overflowed the plot's right edge.
+        anchor = "start" if i == 0 else "end" if i == len(energy_ticks) - 1 else "middle"
+        axis.append(
+            f'<line x1="{tx:.1f}" y1="{pad}" x2="{tx:.1f}" y2="{height - pad}" stroke="#1b2532" stroke-width="1"/>'
+            f'<text x="{tx:.1f}" y="{height - pad + 16}" font-size="10" fill="#93a4b8" '
+            f'text-anchor="{anchor}">{tick:,.0f}</text>'
+        )
+    for tick in _axis_ticks(acc_min, acc_max):
+        ty = y(tick)
+        axis.append(
+            f'<line x1="{pad}" y1="{ty:.1f}" x2="{width - pad}" y2="{ty:.1f}" stroke="#1b2532" stroke-width="1"/>'
+            f'<text x="{pad - 8}" y="{ty + 3:.1f}" font-size="10" fill="#93a4b8" '
+            f'text-anchor="end">{tick:.3f}</text>'
+        )
+
+    # Configured convergence targets as dashed reference lines. Range-checked
+    # because _extend_for_target deliberately refuses to widen the domain for
+    # a target that is nowhere near the measured data.
+    if target_accuracy is not None and acc_min <= target_accuracy <= acc_max:
+        ty = y(target_accuracy)
+        axis.append(
+            f'<line x1="{pad}" y1="{ty:.1f}" x2="{width - pad}" y2="{ty:.1f}" stroke="#e0b354" '
+            f'stroke-width="1.5" stroke-dasharray="6 4"/>'
+            f'<text x="{width - pad - 4}" y="{ty - 6:.1f}" font-size="10" fill="#e0b354" '
+            f'text-anchor="end">target accuracy {target_accuracy:.3f}</text>'
+        )
+    if target_energy is not None and e_min <= target_energy <= e_max:
+        tx = x(target_energy)
+        axis.append(
+            f'<line x1="{tx:.1f}" y1="{pad}" x2="{tx:.1f}" y2="{height - pad}" stroke="#e0b354" '
+            f'stroke-width="1.5" stroke-dasharray="6 4"/>'
+            f'<text x="{tx + 5:.1f}" y="{pad + 12}" font-size="10" fill="#e0b354" '
+            f'text-anchor="start">target energy {target_energy:,.0f}</text>'
+        )
+
+    # The front itself, as a staircase: each riser is the extra energy the
+    # next accuracy level costs.
+    front_line = ""
+    front_points = _pareto_front_2d(plottable)
+    if len(front_points) > 1:
+        steps: List[str] = []
+        previous_y: Optional[float] = None
+        for r in front_points:
+            px, py = x(r["energy_pj"]), y(r["accuracy"])
+            if previous_y is not None:
+                steps.append(f"{px:.1f},{previous_y:.1f}")  # tread: pay energy at the old accuracy
+            steps.append(f"{px:.1f},{py:.1f}")  # riser: the accuracy that energy buys
+            previous_y = py
+        front_line = (
+            f'<polyline points="{" ".join(steps)}" fill="none" stroke="#5b9dff" stroke-width="2" opacity="0.85"/>'
+        )
 
     trajectory = ""
     if len(searched) > 1:
         path = " ".join(f"{x(r['energy_pj']):.1f},{y(r['accuracy']):.1f}" for r in searched)
-        trajectory = f'<polyline points="{path}" fill="none" stroke="#4a6b8a" stroke-width="1.5"/>'
+        trajectory = (
+            f'<polyline points="{path}" fill="none" stroke="#4a6b8a" stroke-width="1.5" stroke-dasharray="4 3"/>'
+        )
 
     marks = []
+    # Two candidates can land on the same point -- iterations 16 and 17 of a
+    # real session shared an energy figure exactly and differed by 0.004
+    # accuracy, putting their two labels 3.4px apart and rendering both
+    # unreadable. Each label is pushed straight down until it clears every
+    # label already placed.
+    placed_labels: List[Tuple[float, float]] = []
     for r in ordered:
         cx, cy = x(r["energy_pj"]), y(r["accuracy"])
-        on_front = r.get("pareto_rank") == 1
+        on_front = r["iteration"] in front_iterations
         warmup = _is_warmup_row(r)
         tooltip = (
             f"iter {r['iteration']} ({'warm-up' if warmup else 'search'}): "
-            f"energy={r['energy_pj']:,.2f}pJ, accuracy={r['accuracy']:.3f}, rank={r.get('pareto_rank')}"
+            f"energy={r['energy_pj']:,.2f}pJ, accuracy={r['accuracy']:.3f}, "
+            f"3-objective rank={r.get('pareto_rank')}"
         )
         color = "#5b9dff" if on_front else "#5c6b7e"
         if warmup:
             shape = (
                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3.5" fill="none" '
-                f'stroke="{color}" stroke-width="1.5" opacity="0.75">'
+                f'stroke="{color}" stroke-width="1.5" opacity="{1.0 if on_front else 0.7}">'
             )
         else:
             shape = f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{color}" opacity="0.95">'
         marks.append(f"{shape}<title>{html.escape(tooltip)}</title></circle>")
         if not warmup or r["iteration"] == last_iteration:
-            marks.append(
-                f'<text x="{cx + 8:.1f}" y="{cy + 4:.1f}" font-size="10" fill="#c8d3e0">{r["iteration"]}</text>'
-            )
+            lx, ly = cx + 8, cy + 4
+            while any(abs(lx - px) < 20 and abs(ly - py) < 11 for px, py in placed_labels):
+                ly += 11
+            placed_labels.append((lx, ly))
+            marks.append(f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="10" fill="#c8d3e0">{r["iteration"]}</text>')
 
     return (
         f'<svg viewBox="0 0 {width} {height}" width="100%" height="auto" '
         f'style="max-width:{width}px" role="img" '
         f'aria-label="energy vs accuracy per iteration; filled marks are surrogate-guided search '
         f'candidates joined in order, hollow marks are unordered LHS warm-up samples, '
-        f'blue marks the current Pareto rank 1 candidates">'
-        + axis
+        f'blue marks and the staircase are the energy-accuracy Pareto front, '
+        f'dashed amber lines are this run\'s configured targets">'
+        + "".join(axis)
         + trajectory
+        + front_line
         + "".join(marks)
         + f'<text x="{width / 2:.1f}" y="{height - 8}" font-size="11" fill="#93a4b8" '
         f'text-anchor="middle">energy_pj &#8594; (lower=better)</text>'
@@ -248,28 +379,65 @@ def _svg_pareto_chart(rows: List[Dict[str, Any]], width: int = 660, height: int 
     )
 
 
-def _pareto_legend_html() -> str:
-    """Separate from `_svg_pareto_chart` since these are two plain HTML
+def _pareto_legend_html(has_targets: bool) -> str:
+    """Separate from `_svg_pareto_chart` since these are plain HTML
     swatches, not SVG -- simpler to keep them (and their bilingual labels,
-    `_bi`) out of the hand-rolled SVG string entirely."""
+    `_bi`) out of the hand-rolled SVG string entirely.
+
+    Ends with an explicit note that the chart's front and the table's
+    `pareto_rank` are computed over different objective sets, because on a
+    real session they visibly disagree (see `_pareto_front_2d`) and a reader
+    comparing the two would otherwise conclude one of them is wrong."""
+    target_item = (
+        '<span class="legend-item"><span class="legend-swatch" '
+        'style="background:transparent;border-top:2px dashed #e0b354;border-radius:0;height:0"></span>'
+        f'{_bi("Dashed amber: configured target", "노란 점선: 이번 실행에 설정된 목표값")}</span>'
+        if has_targets
+        else ""
+    )
     return (
         '<div class="legend">'
         '<span class="legend-item"><span class="legend-swatch" style="background:#5b9dff"></span>'
-        f'{_bi("Pareto rank 1 (on current front)", "파레토 랭크 1 (현재 프론트)")}</span>'
+        f'{_bi("On the energy-accuracy Pareto front", "에너지-정확도 파레토 프론트 위의 후보")}</span>'
         '<span class="legend-item"><span class="legend-swatch" style="background:#5c6b7e"></span>'
-        f'{_bi("Not on current front (dominated)", "현재 프론트에 속하지 않음 (피지배 후보)")}</span>'
+        f'{_bi("Dominated on these two axes", "이 두 축 기준으로 피지배인 후보")}</span>'
         '<span class="legend-item"><span class="legend-swatch" '
         'style="background:transparent;border:1.5px solid #5c6b7e"></span>'
         f'{_bi("Hollow: LHS warm-up (unordered samples)", "빈 원: LHS 워밍업 (표본 간 순서 없음)")}</span>'
         '<span class="legend-item"><span class="legend-swatch" '
-        'style="background:#4a6b8a;border-radius:0;height:2px"></span>'
-        f'{_bi("Line: surrogate-guided search order", "실선: 서로게이트 기반 탐색 순서")}</span>'
+        'style="background:#5b9dff;border-radius:0;height:2px"></span>'
+        f'{_bi("Staircase: the front itself", "계단선: 파레토 프론트")}</span>'
+        '<span class="legend-item"><span class="legend-swatch" '
+        'style="background:transparent;border-top:2px dashed #4a6b8a;border-radius:0;height:0"></span>'
+        f'{_bi("Dashed: surrogate-guided search order", "점선: 서로게이트 기반 탐색 순서")}</span>'
+        f"{target_item}"
         "</div>"
+        f'<p class="summary">{_bi("The front drawn here is over the two plotted axes only. The pareto_rank column "
+                                 "in the table below is computed over three objectives (accuracy, energy, latency), "
+                                 "so a candidate can be rank 1 there and still sit below this staircase.",
+                                 "이 그래프의 프론트는 화면에 표시된 두 축만을 기준으로 산출한 것입니다. 아래 표의 "
+                                 "pareto_rank 열은 정확도·에너지·지연 시간 세 가지 목적을 모두 반영하므로, 표에서 "
+                                 "랭크 1인 후보가 이 계단선 아래에 위치할 수 있습니다.")}</p>'
     )
 
 
 def _format_or_dash(value: Any, fmt: str = "{:.4f}") -> str:
     return fmt.format(value) if isinstance(value, (int, float)) else "-"
+
+
+def _format_significant(value: Any, digits: int = 3) -> str:
+    """Fixed-decimal formatting silently zeroes out whole columns: a real
+    session's noc_latency_ms values span 0.000342-0.000432 ms, every one of
+    which `{:.3f}` prints as "0.000" -- reading as "the latency model
+    contributes nothing" rather than "these differ by 26%". Scaling the
+    decimals to the magnitude keeps `digits` significant figures whatever
+    the units turn out to be."""
+    if not isinstance(value, (int, float)):
+        return "-"
+    if value == 0:
+        return "0"
+    decimals = max(0, digits - 1 - math.floor(math.log10(abs(value))))
+    return f"{value:,.{decimals}f}"
 
 
 def _row_html(r: Dict[str, Any]) -> str:
@@ -294,7 +462,7 @@ def _row_html(r: Dict[str, Any]) -> str:
         f"<td>{html.escape(str(r.get('search_tag') or '-'))}</td>"
         f"<td>{_format_or_dash(r.get('accuracy'))}</td>"
         f"<td>{_format_or_dash(r.get('energy_pj'), '{:.2f}')}</td>"
-        f"<td>{_format_or_dash(r.get('noc_latency_ms'), '{:.3f}')}</td>"
+        f"<td>{_format_significant(r.get('noc_latency_ms'))}</td>"
         f"<td>{r.get('pareto_rank', '-')}</td>"
         f"<td>{_bi('yes', '예') if r.get('is_converged') else _bi('no', '아니요')}</td>"
         f'<td class="rationale-cell">{rationale_html}</td>'
@@ -429,6 +597,204 @@ def _calibration_section_html(state: AutoCIMState) -> str:
     return f'<p class="calib-ok">{_bi(ok_en, ok_ko)}{caveat_html}</p>'
 
 
+def _spec_cell(label_en: str, label_ko: str, value: str) -> str:
+    return f'<div class="spec-k">{_bi(label_en, label_ko)}</div><div class="spec-v">{value}</div>'
+
+
+_UNSET = None  # sentinel-free: HWConfig's optional fields are genuinely None when unstated
+
+
+def _or_unset(value: Any, suffix: str = "") -> str:
+    """Optional HWConfig fields (wire_resistance, device_noise_sigma,
+    sram_buffer_kb, tech_node_nm, device_type) are legitimately unset for a
+    spec that doesn't model them -- rendering those as a blank cell would
+    read as a bug, and rendering a made-up default would be worse."""
+    if value is _UNSET:
+        return f'<span class="spec-unset">{_bi("not specified", "미지정")}</span>'
+    # Only the value is escaped -- `suffix` is this module's own literal
+    # markup (unit entities like &#8486;/&micro;m), not data.
+    return f"{html.escape(f'{value:g}' if isinstance(value, float) else str(value))}{suffix}"
+
+
+def _run_config_section_html(state: AutoCIMState, hw_config: Optional[HWConfig]) -> str:
+    """The exact workload and hardware this run was executed against.
+
+    Previously the report named only `model_id`/`hw_spec_id`, which is an
+    opaque label: a reader could not tell whether "cim_v1_128x128" meant an
+    8-bit or a 4-bit ADC, how many tiles were available, or what device
+    non-idealities were modelled -- all of which change every energy and
+    accuracy number below. `hw_config` is passed in rather than read from
+    state because `AutoCIMState` carries the id, not the resolved spec
+    (main.py's `write_dashboard` resolves it through middleware's registry);
+    when it can't be resolved the section degrades to the ids alone and says
+    so, rather than inventing values (docs/coding_guidelines.md 5.C)."""
+    dataset = state.get("dataset_id")
+    workload = [
+        _spec_cell("Model", "대상 모델", html.escape(str(state.get("model_id")))),
+        _spec_cell(
+            "Dataset",
+            "데이터셋",
+            html.escape(str(dataset)) if dataset else _bi("cifar10 (model default)", "cifar10 (모델 기본값)"),
+        ),
+        _spec_cell("Search strategy", "탐색 전략", html.escape(str(state.get("search_strategy")))),
+        _spec_cell("Run seed", "난수 시드", html.escape(str(state.get("run_seed")))),
+    ]
+
+    if hw_config is None:
+        hardware = [
+            _spec_cell("Hardware spec id", "하드웨어 사양 ID", html.escape(str(state.get("hw_spec_id")))),
+        ]
+        note = (
+            f'<p class="summary">{_bi("The full hardware specification could not be resolved for this report "
+                                      "(it is registered at run time, not stored in the run state), so only its "
+                                      "identifier is shown.", "이 리포트에서는 하드웨어 사양 전체를 확인할 수 "
+                                      "없습니다 (사양은 실행 시점에 등록되며 실행 상태에 저장되지 않습니다). "
+                                      "따라서 식별자만 표시합니다.")}</p>'
+        )
+    else:
+        hardware = [
+            _spec_cell("Hardware spec id", "하드웨어 사양 ID", html.escape(hw_config.hw_spec_id)),
+            _spec_cell(
+                "Crossbar array",
+                "크로스바 배열",
+                f"{hw_config.crossbar_rows} &times; {hw_config.crossbar_cols}",
+            ),
+            _spec_cell("Tiles on chip", "온칩 타일 수", str(hw_config.num_tiles)),
+            _spec_cell("ADC / DAC resolution", "ADC / DAC 해상도", f"{hw_config.adc_bits} bit / {hw_config.dac_bits} bit"),
+            _spec_cell(
+                "NoC",
+                "네트워크 온 칩",
+                f"{html.escape(hw_config.noc_topology.value)}, {hw_config.noc_link_bandwidth_gbps:g} Gbps",
+            ),
+            _spec_cell("Wire resistance", "배선 저항", _or_unset(hw_config.wire_resistance_ohm_per_um, " &#8486;/&micro;m")),
+            _spec_cell("Device noise &sigma;", "소자 잡음 &sigma;", _or_unset(hw_config.device_noise_sigma)),
+            _spec_cell("SRAM buffer per tile", "타일당 SRAM 버퍼", _or_unset(hw_config.sram_buffer_kb, " KB")),
+            _spec_cell("Technology node", "공정 노드", _or_unset(hw_config.tech_node_nm, " nm")),
+            _spec_cell(
+                "Cell device technology",
+                "셀 소자 기술",
+                _or_unset(hw_config.device_type.value if hw_config.device_type else None),
+            ),
+        ]
+        note = ""
+
+    return (
+        '<div class="spec-panels">'
+        f'<div class="panel"><div class="panel-title">{_bi("Workload", "대상 워크로드")}</div>'
+        f'<div class="spec-grid">{"".join(workload)}</div></div>'
+        f'<div class="panel"><div class="panel-title">{_bi("Hardware specification", "하드웨어 사양")}</div>'
+        f'<div class="spec-grid">{"".join(hardware)}</div></div>'
+        "</div>"
+        f"{note}"
+    )
+
+
+def _targets_section_html(state: AutoCIMState) -> str:
+    """What "converged" was actually being measured against.
+
+    `is_converged` is the only outcome the header reports, but it is a
+    conjunction: a candidate must clear *every configured* target
+    (target_accuracy/target_energy_pj/target_latency_ms, state.py) **and**
+    pass @verifier's IR-drop/noise feasibility check. A reader shown only
+    the verdict cannot tell which of those bound, nor whether an unset
+    target means "met easily" or "never checked" -- so each dimension is
+    listed with its target, this run's best measured value, and whether the
+    target gated the run at all.
+
+    The best value per dimension is a per-column best across every
+    candidate, so the three cells generally come from three *different*
+    candidates -- stated in the note, because reading them as one achievable
+    design point would overstate the result. The candidate that actually met
+    everything simultaneously is called out separately."""
+    history = [c for c in state.get("candidate_history", []) if isinstance(c, dict)]
+
+    def best(field: str, better) -> Optional[float]:
+        values = [c[field] for c in history if isinstance(c.get(field), (int, float))]
+        return better(values) if values else None
+
+    # Each dimension carries its own formatter rather than a shared format
+    # string: latency needs `_format_significant` (its real values are
+    # ~0.0004 ms, which any fixed-decimal format prints as a flat "0.000").
+    dimensions = [
+        (
+            "accuracy",
+            "정확도",
+            state.get("target_accuracy"),
+            best("accuracy", max),
+            "{:.4f}".format,
+            lambda b, t: b >= t,
+        ),
+        (
+            "energy_pj",
+            "에너지 (pJ)",
+            state.get("target_energy_pj"),
+            best("energy_pj", min),
+            "{:,.2f}".format,
+            lambda b, t: b <= t,
+        ),
+        (
+            "latency_ms",
+            "지연 시간 (ms)",
+            state.get("target_latency_ms"),
+            best("noc_latency_ms", min),
+            _format_significant,
+            lambda b, t: b <= t,
+        ),
+    ]
+
+    rows = []
+    for label_en, label_ko, target, achieved, fmt, meets in dimensions:
+        if target is None:
+            target_cell = f'<span class="spec-unset">{_bi("not set (not gated)", "설정 안 함 (수렴 판정 미적용)")}</span>'
+            verdict = '<span class="spec-unset">&mdash;</span>'
+        else:
+            target_cell = fmt(target)
+            if achieved is None:
+                verdict = f'<span class="spec-unset">{_bi("no data yet", "측정값 없음")}</span>'
+            elif meets(achieved, target):
+                verdict = f'<span class="verdict-ok">&#10003; {_bi("met", "달성")}</span>'
+            else:
+                verdict = f'<span class="verdict-miss">&#10007; {_bi("not met", "미달성")}</span>'
+        achieved_cell = fmt(achieved) if achieved is not None else "-"
+        rows.append(
+            f"<tr><td>{_bi(label_en, label_ko)}</td><td>{target_cell}</td>"
+            f"<td>{achieved_cell}</td><td>{verdict}</td></tr>"
+        )
+
+    converged = next((c for c in reversed(history) if c.get("is_converged")), None)
+    if converged is None:
+        converged_line = _bi(
+            "No single candidate has met every configured target together yet.",
+            "설정된 목표를 동시에 모두 충족한 후보는 아직 없습니다.",
+        )
+    else:
+        detail = (
+            f"iteration {converged.get('iteration')} &mdash; "
+            f"accuracy {_format_or_dash(converged.get('accuracy'))}, "
+            f"energy {_format_or_dash(converged.get('energy_pj'), '{:,.2f}')} pJ, "
+            f"latency {_format_significant(converged.get('noc_latency_ms'))} ms"
+        )
+        converged_line = _bi(
+            f"Met every configured target together at {detail}.",
+            f"설정된 목표를 동시에 모두 충족한 후보: {detail}.",
+        )
+
+    return (
+        '<table class="targets-table"><thead><tr>'
+        f'<th>{_bi("objective", "목적 지표")}</th><th>{_bi("target", "목표값")}</th>'
+        f'<th>{_bi("best this run", "이번 실행 최고값")}</th><th>{_bi("verdict", "달성 여부")}</th>'
+        f"</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        f'<p class="summary">{converged_line}</p>'
+        f'<p class="summary">{_bi("Each best-this-run figure is the best value over all candidates for that "
+                                 "objective alone, so the three can come from three different candidates. "
+                                 "Convergence additionally requires @verifier&#39;s IR-drop and device-noise "
+                                 "feasibility check to pass, which no target column can show.",
+                                 "‘이번 실행 최고값’은 각 목적 지표별로 개별 산출한 최고값이므로, 세 값이 서로 다른 "
+                                 "후보에서 나온 것일 수 있습니다. 또한 수렴 판정에는 @verifier의 IR 강하·소자 잡음 "
+                                 "타당성 검사 통과가 추가로 요구되며, 이는 목표값 표에 나타나지 않습니다.")}</p>'
+    )
+
+
 def _llm_usage_summary(state: AutoCIMState) -> Dict[str, Any]:
     usage = state.get("llm_usage", [])
     return {
@@ -438,13 +804,17 @@ def _llm_usage_summary(state: AutoCIMState) -> Dict[str, Any]:
     }
 
 
-def render_dashboard_html(state: AutoCIMState) -> str:
-    """Pure function of `state` -- no I/O, no LangGraph/checkpointer
+def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = None) -> str:
+    """Pure function of `state` (plus the optional resolved `hw_config`, which
+    `AutoCIMState` only names by id) -- no I/O, no LangGraph/checkpointer
     dependency, so it's directly unit-testable against a synthetic state
     (state_factory in tests) exactly like the rest of this project's
-    Mock-First-tested tools."""
+    Mock-First-tested tools. `hw_config=None` renders every other section
+    unchanged and degrades the hardware panel to the id alone."""
     rows = _iteration_rows(state)
     usage = _llm_usage_summary(state)
+    chart_targets = {"accuracy": state.get("target_accuracy"), "energy_pj": state.get("target_energy_pj")}
+    has_targets = any(v is not None for v in chart_targets.values())
 
     title = f"{state.get('model_id')} / {state.get('hw_spec_id')}"
     low_confidence = bool(state.get("low_confidence_conclusion"))
@@ -550,6 +920,21 @@ def render_dashboard_html(state: AutoCIMState) -> str:
   .warmup-details[open] > summary {{ color: var(--text); margin-bottom: 8px; }}
   table.warmup-inner-table {{ margin: 0; }}
   .panel {{ background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }}
+  .panel-title {{
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text-muted); margin-bottom: 10px;
+  }}
+  .spec-panels {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }}
+  .spec-grid {{ display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; align-items: baseline; }}
+  .spec-k {{ font-size: 12.5px; color: var(--text-muted); }}
+  .spec-v {{
+    font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+    font-size: 13px; color: var(--text); text-align: right;
+  }}
+  .spec-unset {{ color: #6c7a8c; font-style: italic; font-family: inherit; }}
+  table.targets-table td:first-child {{ font-family: inherit; }}
+  .verdict-ok {{ color: var(--green-text); font-family: inherit; }}
+  .verdict-miss {{ color: var(--amber-text); font-family: inherit; }}
   .calib-warning {{ background: var(--amber-bg); border: 1px solid var(--amber-border); color: var(--amber-text); padding: 12px 16px; border-radius: 8px; }}
   .calib-ok {{ background: var(--green-bg); border: 1px solid var(--green-border); color: var(--green-text); padding: 12px 16px; border-radius: 8px; }}
   .phase-box {{ background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; }}
@@ -579,6 +964,12 @@ def render_dashboard_html(state: AutoCIMState) -> str:
 <p class="summary">{_bi(llm_summary_en, llm_summary_ko)}</p>
 {f'<p class="calib-warning">{_bi("This session gave up without meeting every configured target -- the reported candidate is just the best one the search tried, not a real convergence.", "이 세션은 설정된 목표를 모두 충족하지 못한 채 종료되었습니다 -- 보고된 후보는 탐색이 시도한 것 중 최선일 뿐, 실제 수렴이 아닙니다.")}</p>' if low_confidence else ""}
 
+<h2>{_bi("Run configuration", "실행 조건")}</h2>
+{_run_config_section_html(state, hw_config)}
+
+<h2>{_bi("Targets vs. best measured", "목표값 대비 실측 최고값")}</h2>
+{_targets_section_html(state)}
+
 <h2>{_bi("Search progress", "탐색 진행 상황")}</h2>
 {_search_phase_summary_html(rows)}
 
@@ -587,8 +978,8 @@ def render_dashboard_html(state: AutoCIMState) -> str:
 
 <h2>{_bi("Pareto front movement (energy vs accuracy, blue = current rank 1)", "파레토 프론트 변화 (에너지 vs 정확도, 파랑 = 현재 랭크 1)")}</h2>
 <div class="panel">
-{_svg_pareto_chart(rows)}
-{_pareto_legend_html()}
+{_svg_pareto_chart(rows, chart_targets)}
+{_pareto_legend_html(has_targets)}
 </div>
 
 <h2>{_bi("Per-iteration candidates", "반복별 후보 목록")}</h2>
