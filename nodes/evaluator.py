@@ -45,7 +45,7 @@ from schemas.tools import (
     VerifierToolOutput,
 )
 from state import AutoCIMState
-from tools.search import compute_pareto_rank
+from tools.search import best_known_candidate, compute_pareto_rank
 from tools.targets import check_targets  # noqa: F401 -- re-exported; see tools/targets.py's docstring
 
 MAX_RETRY_LIMIT = 3
@@ -157,14 +157,24 @@ def evaluator_node(state: AutoCIMState) -> Dict[str, Any]:
             state.get("target_latency_ms"),
         )
 
-    is_converged = hw_verified and not target_errors
+    meets_targets = hw_verified and not target_errors
 
+    # `meets_targets`, not the run-level stop decision below: a candidate
+    # entry's own `is_converged` records whether *that candidate* met every
+    # configured target, which is what best_known_candidate selects on.
+    # Identical to the old argument under satisficing (where the two
+    # coincide); under a budget they must not be conflated, or every
+    # candidate found before the budget ran out would be recorded as a
+    # failure and become unselectable.
     candidate_entry = build_candidate_entry(
-        state.get("candidate_history", []), metrics, iteration_count, is_converged, has_validation_errors=bool(validation_errors)
+        state.get("candidate_history", []), metrics, iteration_count, meets_targets, has_validation_errors=bool(validation_errors)
     )
     candidate_history: List[Dict[str, Any]] = [candidate_entry] if candidate_entry is not None else []
 
-    if is_converged:
+    budget = state.get("search_budget_iterations")
+    budget_exhausted = budget is not None and iteration_count >= budget
+
+    if meets_targets and budget is None:
         log_event(
             run_id_for(state),
             node="evaluator",
@@ -178,6 +188,63 @@ def evaluator_node(state: AutoCIMState) -> Dict[str, Any]:
             pareto_rank=(candidate_entry or {}).get("pareto_rank"),
         )
         return {"is_converged": True, "needs_hitl": False, "candidate_history": candidate_history}
+
+    if budget is not None:
+        history = list(state.get("candidate_history", [])) + candidate_history
+        if budget_exhausted:
+            # `low_confidence_conclusion` (state.py) already means exactly
+            # "the run stopped without any candidate meeting its targets,
+            # and what follows is only the best of what was tried" -- every
+            # reporting consumer distinguishes it already, so a budget that
+            # ran out empty-handed reuses it rather than adding a second
+            # flag meaning the same thing.
+            any_met = any(c.get("is_converged") for c in history)
+            final_candidate = best_known_candidate(history, any_met)
+            log_event(
+                run_id_for(state),
+                node="evaluator",
+                event="search_budget_exhausted",
+                iteration=iteration_count,
+                is_converged=any_met,
+                budget=budget,
+                candidates_meeting_targets=sum(1 for c in history if c.get("is_converged")),
+                accuracy=(final_candidate or {}).get("accuracy"),
+                energy_pj=(final_candidate or {}).get("energy_pj"),
+                selected_iteration=(final_candidate or {}).get("iteration"),
+            )
+            return {
+                "is_converged": True,
+                "needs_hitl": False,
+                "low_confidence_conclusion": not any_met,
+                "final_candidate": final_candidate,
+                "candidate_history": candidate_history,
+            }
+        if meets_targets:
+            # Spending the rest of the budget on a target already met is
+            # progress, not a stall: leaving `retry_count` to climb here
+            # would fire a HITL interrupt at MAX_RETRY_LIMIT purely because
+            # the search kept succeeding, and record each hit in
+            # `failure_history` as though it had missed.
+            log_event(
+                run_id_for(state),
+                node="evaluator",
+                event="candidate_evaluated",
+                iteration=iteration_count,
+                is_converged=False,
+                needs_hitl=False,
+                met_targets_continuing_on_budget=True,
+                budget=budget,
+                accuracy=(candidate_entry or {}).get("accuracy"),
+                energy_pj=(candidate_entry or {}).get("energy_pj"),
+                noc_latency_ms=(candidate_entry or {}).get("noc_latency_ms"),
+                pareto_rank=(candidate_entry or {}).get("pareto_rank"),
+            )
+            return {
+                "is_converged": False,
+                "needs_hitl": False,
+                "retry_count": 0,
+                "candidate_history": candidate_history,
+            }
 
     new_retry_count = retry_count + 1
     # planner_flagged_anomaly (state.py): @planner's LLM sets this fresh
@@ -223,8 +290,20 @@ def evaluator_node(state: AutoCIMState) -> Dict[str, Any]:
     }
 
 
-def evaluator_router(state: AutoCIMState) -> Literal["Converged (Done)", "HITL Interrupt", "Re-plan with History"]:
+def evaluator_router(
+    state: AutoCIMState,
+) -> Literal["Converged (Done)", "Concluded (low confidence)", "HITL Interrupt", "Re-plan with History"]:
     if state.get("is_converged", False):
+        # A `search_budget_iterations` run whose budget ran out with nothing
+        # ever meeting its targets stops here the same way hitl_node's
+        # conclude-with-best path does, and for the same reason: there is
+        # no converged verdict for @precision_verifier to confirm, so
+        # routing there would spend a real NeuroSim/CACTI call re-verifying
+        # a candidate already known to have missed. Unreachable for a
+        # satisficing run, where `is_converged` only ever means a real
+        # target-check pass.
+        if state.get("low_confidence_conclusion", False):
+            return "Concluded (low confidence)"
         return "Converged (Done)"
     if state.get("needs_hitl", False):
         return "HITL Interrupt"
