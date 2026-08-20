@@ -872,7 +872,11 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
     --bg: #0b0f14;
     --bg-panel: #111821;
     --bg-panel-alt: #161f2b;
-    --border: #253242;
+    /* Was #253242, only 1.37:1 against --bg-panel -- close to invisible on a
+       projector, which matters because these rules are what separate rows in
+       an 18-row table. #3d4e63 is 2.10:1: legible without the heavy boxed-in
+       look a full 3:1 gives a dark theme. */
+    --border: #3d4e63;
     --text: #e6edf3;
     --text-muted: #93a4b8;
     --blue: #5b9dff;
@@ -938,7 +942,15 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
   td {{ font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; }}
   td.rationale-cell {{
     font-family: inherit; white-space: normal; word-break: break-word;
-    max-width: 380px; color: var(--text);
+    /* min-width, not just max-width: with only a maximum this column was
+       free to collapse to its longest single word once the other seven
+       columns had taken their min-content width, wrapping a 300-character
+       rationale into one word per line and making a single row taller than
+       the viewport. That vertical blow-up -- not the table's width -- is
+       what made this section painful to read on a narrow screen. Holding a
+       floor costs a little more horizontal scroll, which the sticky header
+       and pinned iteration column above now make cheap. */
+    min-width: 260px; max-width: 380px; color: var(--text);
   }}
   tr.warmup-group-row:hover {{ background: none; }}
   td.warmup-group-cell {{ padding: 0; }}
@@ -955,8 +967,57 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
   /* An 8-column monospace table has a hard min-content width (~735px);
      below that it used to push the whole page sideways, which is what a
      reader sees as "the right edge is cut off" when zooming in. Scrolling
-     it inside its own box keeps the rest of the page in place. */
-  .table-scroll {{ overflow-x: auto; }}
+     it inside its own box keeps the rest of the page in place.
+
+     Deliberately NOT a scroll container above that width: `overflow` on an
+     ancestor becomes the scrollport for `position: sticky`, so making this
+     box scroll unconditionally would stop the header below from sticking to
+     the viewport on the wide screen this is normally presented from, and
+     would trap the mouse wheel in a nested scroll region for no benefit --
+     there is nothing to scroll horizontally when the table already fits. */
+  .table-scroll {{ overflow: visible; }}
+  @media (max-width: 1000px) {{
+    .table-scroll {{ overflow: auto; }}
+    /* The horizontal scrollbar lives at the bottom of this box. Left
+       uncapped, that bottom is a screenful or more below the fold on an
+       18-row table whose rationale column wraps, so reaching the scrollbar
+       meant scrolling the header off-screen first and then having nothing
+       left on screen to say which column was which. Capping the box keeps
+       the scrollbar reachable and gives the sticky header something to
+       stick to. */
+    .table-scroll-tall {{ max-height: 78vh; }}
+  }}
+  /* `table`'s own `overflow: hidden` (there to clip the rounded corners)
+     makes the table itself a scroll container, which would become the
+     scrollport for the sticky header and stop it sticking to anything that
+     moves. Dropped here, with the corner radii applied to the header cells
+     directly so the rounded top survives. */
+  .iteration-table {{ overflow: visible; }}
+  .iteration-table > thead > tr > th:first-child {{ border-top-left-radius: 8px; }}
+  .iteration-table > thead > tr > th:last-child {{ border-top-right-radius: 8px; }}
+  /* Child combinators throughout: the warm-up group row nests a whole inner
+     table, and a descendant selector would pin its cells too. */
+  .iteration-table > thead > tr > th {{
+    position: sticky; top: 0; z-index: 2;
+    /* border-collapse: collapse detaches borders from their cell, so a
+       sticky header's own border-bottom stays behind while the header
+       moves. An inset shadow travels with the element. */
+    border-bottom: none; box-shadow: inset 0 -1px 0 var(--border);
+  }}
+  /* The iteration number is the row's identity; pinned, a horizontal scroll
+     can never leave a row unidentifiable. */
+  @media (max-width: 1000px) {{
+    .iteration-table > tbody > tr > td:first-child {{
+      position: sticky; left: 0; z-index: 1; background: var(--bg-panel);
+    }}
+    .iteration-table > tbody > tr:hover > td:first-child {{ background: var(--bg-panel-alt); }}
+    /* The collapsed warm-up row is a single full-width colspan cell -- it is
+       the row, so pinning it would pin the entire row. */
+    .iteration-table > tbody > tr > td.warmup-group-cell {{ position: static; }}
+    .iteration-table > thead > tr > th:first-child {{
+      left: 0; z-index: 3; background: var(--bg-panel-alt);
+    }}
+  }}
   .panel {{ background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; }}
   .panel-title {{
     font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
@@ -1024,8 +1085,8 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
 </div>
 
 <h2>{_bi("Per-iteration candidates", "반복별 후보 목록")}</h2>
-<div class="table-scroll">
-<table>
+<div class="table-scroll table-scroll-tall">
+<table class="iteration-table">
 <thead><tr>
 <th>{_bi("iter", "반복")}</th>
 <th>{_bi("search phase", "탐색 단계")}</th>
