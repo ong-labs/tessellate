@@ -256,6 +256,21 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--search-budget-iterations",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Keep searching until N iterations have been evaluated, then conclude "
+            "with the best candidate that met every configured --target-* (instead "
+            "of stopping at the first one that does). Counts warm-up candidates, "
+            "which are real evaluations. Without this flag the search stops at its "
+            "first hit -- the right behaviour for an ordinary run, but not "
+            "comparable against a grid that evaluates every point and reports its "
+            "best."
+        ),
+    )
+    parser.add_argument(
         "--ignore-learned-state",
         action="store_true",
         help=(
@@ -877,6 +892,7 @@ def build_initial_state(
     dataset_id: Optional[str] = None,
     run_seed: int = 0,
     search_strategy: str = "multi_objective",
+    search_budget_iterations: Optional[int] = None,
 ) -> AutoCIMState:
     if allow_approximate_calibration:
         # Default: nearest-KNOWN_REFERENCES fallback (tools/calibration.py)
@@ -920,6 +936,8 @@ def build_initial_state(
         "target_accuracy": target_accuracy,
         "target_energy_pj": target_energy_pj,
         "target_latency_ms": target_latency_ms,
+        "search_budget_iterations": search_budget_iterations,
+        "final_candidate": None,
         "iteration_count": 0,
         "retry_count": 0,
         "is_converged": False,
@@ -1536,6 +1554,7 @@ def run_session(
     dataset_id: Optional[str] = None,
     run_seed: int = 0,
     search_strategy: str = "multi_objective",
+    search_budget_iterations: Optional[int] = None,
     ignore_learned_state: bool = False,
 ) -> None:
     register_hw_config(hw_config)
@@ -1655,6 +1674,7 @@ def run_session(
             dataset_id=dataset_id,
             run_seed=run_seed,
             search_strategy=search_strategy,
+            search_budget_iterations=search_budget_iterations,
         )
 
         # Cross-session learning (store.py): a hw_spec_id this project has
@@ -1758,6 +1778,9 @@ def run_session(
                     on_progress=_print_warmup_progress,
                     dataset_id=dataset_id,
                     run_seed=run_seed,
+                    target_accuracy=target_accuracy,
+                    target_energy_pj=target_energy_pj,
+                    target_latency_ms=target_latency_ms,
                 )
             except KeyboardInterrupt:
                 # Nothing persisted yet at this point (warm-up runs before
@@ -1928,6 +1951,7 @@ def main() -> None:
             dataset_id=args.dataset_id,
             run_seed=args.seed,
             search_strategy=args.search_strategy,
+            search_budget_iterations=args.search_budget_iterations,
             ignore_learned_state=args.ignore_learned_state,
         )
 
