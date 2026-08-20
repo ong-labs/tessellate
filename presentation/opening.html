@@ -61,6 +61,9 @@
     max-width: 30em;
   }
   .lead strong { color: var(--text); font-weight: 700; }
+  /* Indented continuation: marks the second line as the reason for the
+     first rather than a second, equal claim. */
+  .cont { display: inline-block; margin-left: 1.6em; }
   .accent { color: var(--amber); }
 
   figure { margin-top: clamp(18px, 3vh, 40px); }
@@ -100,10 +103,10 @@
   <!-- 1 ─────────────────────────────────────────────────────────────── -->
   <section class="slide active">
     <div class="kicker">문제</div>
-    <h1>AI는 전기를 많이 씁니다.<br><span class="dim">그래서 칩이 바뀌고 있습니다.</span></h1>
+    <h1>AI는 전기를 많이 사용합니다.<br><span class="dim">그래서 칩이 바뀌고 있습니다.</span></h1>
     <p class="lead">
-      요즘 AI 칩은 계산을 <strong>메모리 안에서 바로</strong> 합니다.
-      데이터를 옮기는 데 드는 전기를 아끼기 위해서입니다.
+      요즘 AI 칩은 계산을 <strong>메모리 안에서 바로</strong> 합니다.<br>
+      <span class="cont">데이터를 옮기는 데 드는 전기를 아끼기 위해서입니다.</span>
     </p>
     <p class="footnote">
       대신 조건이 하나 붙습니다 &mdash; <b>AI 모델을 칩에 맞게 줄여서 올려야 합니다.</b>
@@ -112,7 +115,7 @@
 
   <!-- 2 ─────────────────────────────────────────────────────────────── -->
   <section class="slide">
-    <div class="kicker">그럼 "줄인다"가 뭔가</div>
+    <div class="kicker">그러면 "줄인다"가 무엇인가</div>
     <h1>사진 앨범을 압축한다고<br>생각하시면 됩니다.</h1>
 
     <div class="map">
@@ -138,12 +141,15 @@
   <section class="slide">
     <div class="kicker">왜 사람이 못 하나</div>
     <h1>손잡이가 20개입니다.</h1>
+    <p class="lead">
+      층마다 <strong>두 개씩</strong>입니다 &mdash; 얼마나 줄일지, 그리고 얼마나 잘라낼지.
+    </p>
 
     <figure>
       <svg viewBox="0 0 980 190" role="img"
            aria-label="10개 층 각각에 정밀도와 잘라내기 손잡이가 하나씩 있어 총 20개">
         <text x="0" y="26" font-size="17" fill="#93a4b8"
-              font-family="Pretendard, 'Malgun Gothic', sans-serif">ResNet-18 · 층 10개</text>
+              font-family="Pretendard, 'Malgun Gothic', sans-serif">ResNet-18 · 층 10개 &#215; 손잡이 2개 = 20개</text>
         <g font-family="ui-monospace, Consolas, monospace" font-size="13" fill="#93a4b8">
           <text x="0" y="82">정밀도</text>
           <text x="0" y="140">잘라내기</text>
@@ -224,7 +230,7 @@
           <path d="M865,104 L865,132 Q865,142 855,142 L120,142 Q110,142 110,132 L110,106"/>
         </g>
         <text x="487" y="163" text-anchor="middle" font-size="15" fill="#5b9dff"
-              font-family="Pretendard, 'Malgun Gothic', sans-serif">목표에 못 미치면 다시</text>
+              font-family="Pretendard, 'Malgun Gothic', sans-serif">지금까지의 결과를 반영해 다음 후보를 고릅니다</text>
         <!-- Branch to the human. Anchored under the arrow rather than beside
              it: set to the right of the line, the label ran past the viewBox
              and rendered as "막ㅎ" on a 16:9 screen. -->
