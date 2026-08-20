@@ -1,6 +1,6 @@
 # AutoCIM-Agent
 
-**CIM(Compute-In-Memory) 반도체를 위한 LangGraph 기반 7-에이전트 HW-SW 공동설계 연구 플랫폼 — 사람의 검토를 전제로 후보를 생성·검증하는 도구**
+**CIM(Compute-In-Memory) 반도체를 위한 LangGraph 기반 8-노드 폐루프 HW-SW 공동설계 연구 플랫폼 — 사람의 검토를 전제로 후보를 생성·검증하는 도구** (LLM의 역할은 의도적으로 제한돼 있습니다 — [아래](#이-프로젝트는-멀티에이전트-시스템이-아닙니다) 참고)
 
 레이어별 양자화 비트/컬럼 프루닝 비율과 크로스바 하드웨어 제약(ADC/DAC 해상도, IR-drop, 소자 노이즈)을 함께 고려해, 정확도·에너지·지연시간의 Pareto 후보를 탐색하고 실제 QAT/물리 시뮬레이션/2단계 정밀 재검증으로 매 후보를 검증하는 폐루프(closed-loop) 파이프라인입니다. **"탐색이 사람이나 더 단순한 방법보다 낫다"는 주장을 하는 프로젝트가 아닙니다** — 그 대신 (1) mock 자리 표시자를 실제 물리 모델로 하나씩 교체해온 과정, (2) 매 교체마다 실제 실행으로 재검증하며 발견한 진짜 버그들, (3) 이 시스템이 실제로 잘하는 것과 못하는 것을 실측으로 정직하게 특성화한 결과를 남기는 것을 목표로 합니다 (아래 "실측으로 확인한 것" 참고). 처음 접하는 개념(CIM/크로스바/ADC·DAC/양자화/파레토 탐색)은 [`docs/concepts.md`](docs/concepts.md)를, 배경과 전체 설계 의도는 [`docs/research_plan.md`](docs/research_plan.md)를, 코드 작성 규칙은 [`docs/coding_guidelines.md`](docs/coding_guidelines.md)를 참고하세요.
 
@@ -35,7 +35,7 @@ graph TD
 
 > `hitl_human_approval`에서 나가는 두 경로는 `graph.py`의 `hitl_router`가 고릅니다: 연구자가 새 탐색 범위를 승인하면 `@planner`로 돌아가고, 더 진행하지 않고 **지금까지의 최선 후보로 종결**하기로 하면(수동 [3]번 선택, 또는 `--auto-hitl`이 라운드 상한에 도달) `low_confidence_conclusion` 표시와 함께 바로 `__end__`로 갑니다 — 이 경우 `@precision_verifier`를 건너뜁니다(애초에 목표를 만족한 적 없는 후보라 정밀 재검증이 확인할 게 없기 때문). 이 표시가 붙은 결과는 `is_converged`를 `True`로 보고하지 않으며, CLI 최종 출력과 대시보드 모두 "검토 필요"로 구분해 보여줍니다.
 
-| 에이전트 | 역할 | 실제 구현 여부 |
+| 노드 | 역할 | 실제 구현 여부 |
 |---|---|---|
 | `@planner` | LHS 워밍업 + IDW 대리모델 기반 다중목적(accuracy/energy_pj/noc_latency_ms) NSGA-II 탐색(`pymoo`, stage별 독립, 최대 40차원)이 수치를 확정하고, LLM은 도구 호출로 근거(rationale) 설명과 이상 징후(anomaly) 플래깅만 담당 (수치 판단 없음) | 실제 |
 | `@tuner` | 크로스바 컬럼(출력 채널)별 독립 스케일을 쓰는 column-wise 가중치 fake-quantization + partial-sum(ADC 직전 출력) 양자화 + 구조적 컬럼 프루닝, 실제 QAT fine-tuning (`tools/qat.py`) | 실제 (CIFAR10 서브셋, CUDA/MPS/CPU 자동 감지) |
@@ -47,6 +47,24 @@ graph TD
 > **스코프 한계 (의도적으로 문서화됨):** `@mapper`/`@profiler`는 NeuroSim/CIM-Loop 같은 정밀 시뮬레이터가 아니라 물리 법칙 기반의 fast-approximation이며(`calibration_factors`로 보정), `@tuner`의 학습 데이터는 CIFAR10 512/128/1000장 서브셋입니다. `@precision_verifier`의 ADC 에너지 항은 실제 시뮬레이터(`hwcomponents_adc`, [arXiv:2404.06553](https://arxiv.org/abs/2404.06553) 기반 문헌-fit 모델)로 항상 교체되고, DAC·크로스바-MAC 에너지는 `hwcomponents_neurosim`(실제 NeuroSim C++ 코어)이 설치된 환경(Docker 이미지)에서만 실제 모델로 교체됩니다 -- 이 패키지는 설치 시점에 NeuroSim의 실제 C++ 소스를 `g++`로 컴파일해야 해서 C++ 툴체인 없는 로컬 환경(이 프로젝트의 Windows 개발 환경 포함)에서는 설치 자체가 안 되고, `requirements-docker.txt`를 통해 Docker 이미지에서만 설치됩니다. 이때도 `HWConfig.device_type`(RRAM/SRAM/PCM/STTRAM)을 명시하지 않으면 NeuroSim의 제네릭 placeholder 셀 위에서 계산되므로, 여전히 특정 실제 칩을 인용하는 수치는 아닙니다 -- `device_type`을 설정해야 실제 소자별 `.cell` 특성이 반영됩니다. `HWConfig.sram_buffer_kb`가 설정된 경우의 SRAM 버퍼 스테이징 에너지도 같은 Docker 이미지에서 `hwcomponents-cacti`(실제 CACTI SRAM 모델)로 교체됩니다 -- 단, 이 버퍼 에너지 항은 `tools/calibration.py`의 보정 계수 계산에서는 의도적으로 제외됩니다: `KNOWN_REFERENCES`의 모든 문헌 수치는 크로스바 매크로 자체의 pJ/MAC만 측정한 것이라 호스트 SRAM 버퍼 에너지를 포함하지 않기 때문입니다 (`tools/cim_physics.py`의 `compute_energy_pj`/`buffer_energy_pj` 분리, `tools/calibration.py`의 `compute_calibration_factor` 참고). CiMLoop 자체는 더 이상 유지보수되지 않고 Docker로만 배포됩니다 (자세한 내용은 `tools/precision_check.py`의 모듈 docstring 참고). 후보 간 **상대 비교**에는 신뢰할 수 있지만, 절대 수치를 그대로 벤치마크/제품 스펙으로 사용하지 마세요.
 >
 > **NSGA-II 서로게이트의 데이터 규모 한계:** `@planner`의 NSGA-II(`pop_size=200`, `n_generations=30`)는 실제 후보가 아니라 IDW 대리모델(surrogate) 예측값 위에서 돌아갑니다. 이 대리모델은 세션당 최대 `_MAX_WARMUP_CANDIDATES`(=20)개, stage당 `_WARMUP_SAMPLES_PER_STAGE`(=1.5)개의 실측 워밍업 후보로 학습되는데(resnet18: 10 stage → 15개), 탐색 공간 자체는 `2 × stage 수`차원(mobilenet_v2 기준 20 stage → 40차원)이라, 세대를 거듭할수록 진짜로 정교해지는 다중목적 탐색이라기보다 소수의 실측 데이터 주변을 폭넓게 보간하는 수준입니다. "진짜 NSGA-II"라는 표현이 구현의 사실(실제 pymoo 알고리즘을 씀)을 가리키는 것이지, 이 정도 데이터로 뒷받침되는 통계적 신뢰도를 의미하는 건 아닙니다.
+
+## 이 프로젝트는 멀티에이전트 시스템이 아닙니다
+
+이름과 초기 기획서([`docs/research_plan.md`](docs/research_plan.md))가 "자율 멀티에이전트"를 표방하지만, **실제 구현은 그렇지 않고 그건 의도된 결과입니다.** 코드 기준 사실은 이렇습니다.
+
+| | 실제 |
+|---|---|
+| 그래프 노드 수 | 8개 (`graph.py`) |
+| LLM을 호출하는 노드 | **1개** — `@planner` (`nodes/planner.py`의 `_explain_decision`) |
+| 그 LLM이 반환하는 것 | `rationale` / `rationale_ko` / `anomaly_note` — **`layer_configs`는 반환하지 않음** |
+| 수치를 정하는 주체 | `tools/search.py`의 NSGA-II (`pymoo`) |
+| 다음 노드를 정하는 주체 | `evaluator_router` — `is_converged`/`needs_hitl` 불리언을 읽는 결정론적 함수 |
+
+나머지 7개 노드는 전부 `state → tool → metrics_store` 형태의 결정론적 함수입니다. LLM도, 자율성도, 노드 간 협상도 없습니다. 통상적인 의미의 멀티에이전트(LLM이 스스로 제어 흐름을 정하는 주체가 여럿)에 해당하는 요소가 0개이고, 하나뿐인 LLM조차 수치 결정권도 라우팅 권한도 갖고 있지 않습니다. 정확한 분류는 **agentic workflow**(고정 토폴로지 + 조건부 라우팅 + 피드백 루프 + HITL 인터럽트)입니다.
+
+**LLM을 강등시킨 이유는 실측입니다.** 초기 구현은 기획서대로 LLM에게 `weight_bits`/`column_pruning_ratio` 결정권을 줬는데, 실제 운영 실행에서 로컬 tool-calling 모델이 정확도 미달 상황에 대해 *"정확도를 높이기 위해 weight_bits를 낮춘다"* 는 정반대 방향의 추론을 했고, 그 결과 탐색 알고리즘 자신의 제안보다 나쁜 후보가 조용히 채택됐습니다. 이 관찰 이후 LLM의 강제 tool call을 근거 설명과 이상 징후 플래깅으로 좁혔고(`schemas/planner.py`의 `PlannerLayerDecision`), 지금은 **LLM 호출이 실패해도 탐색은 그대로 진행됩니다** — 실패 시 rationale이 템플릿 문구로 대체될 뿐입니다.
+
+즉 이 프로젝트에서 "에이전트를 몇 개 썼는가"는 자랑거리가 아니라, **수치 환각(hallucination)이 물리 시뮬레이션 경로에 들어오지 못하도록 LLM의 권한을 실측 근거로 좁혀간 기록**입니다. 에이전트 개수를 늘리고 싶다면 규칙이 판단을 포기하는 지점(`main.py`의 `suggest_override_bounds`가 정확도와 에너지가 서로 반대 방향으로 당길 때 `None`을 반환하는 케이스)이 유일하게 정당한 자리이며, 아직 구현하지 않았습니다.
 
 ## 실측으로 확인한 것 — 이 시스템이 잘하는 것과 아직 못하는 것
 
@@ -294,7 +312,7 @@ pip install --force-reinstall --no-deps torch==2.13.0 torchvision==0.28.0 --inde
 ```
 graph.py, main.py, state.py, llm.py, middleware.py,
 observability.py, store.py   # 코어 오케스트레이션/런타임 (LangGraph 조립, 상태 스키마, LLM 운영, 구조화 로깅)
-nodes/                        # 7개 에이전트 노드 함수
+nodes/                        # 8개 그래프 노드 함수 (LLM을 쓰는 건 @planner 하나뿐)
 tools/                        # 백엔드 시뮬레이터 (QAT, 물리 시뮬레이션, 탐색 알고리즘, 병렬 워밍업, 대시보드)
 schemas/                      # Pydantic 입출력 스키마
 tests/                        # pytest 스위트 (전부 stub 기반)
