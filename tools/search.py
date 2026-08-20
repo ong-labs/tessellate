@@ -519,11 +519,33 @@ def best_known_candidate(
 ) -> Optional[Dict[str, Any]]:
     """The candidate a caller should treat as this session's answer.
 
-    `session_is_converged=True` means `candidate_history[-1]` is the entry
-    that actually made @evaluator/@precision_verifier set `is_converged`
-    True by meeting every configured target -- the graph stops immediately
-    after that iteration, so nothing gets appended afterward, and that last
-    entry is trustworthy by construction. `False` (including the
+    `session_is_converged=True` means some entry actually met every
+    configured target. Under the default satisficing stopping rule
+    (`search_budget_iterations` unset, state.py) that entry is
+    `candidate_history[-1]`: the graph stops immediately after the first
+    hit, so nothing is appended afterward and the last entry is the answer
+    by construction. Under a budget the search deliberately keeps going
+    past its first hit, so the last entry is merely the last one *tried* --
+    the answer is the best of every entry that met the targets, which is
+    what the `met` branch below selects. That branch reduces to
+    `candidate_history[-1]` in the satisficing case (only one entry is ever
+    flagged), so both rules share one implementation rather than diverging.
+
+    "Best" here is highest accuracy among target-meeting candidates -- the
+    same rule `tools/baseline_compare.py`'s `best_grid_point` applies to the
+    grid. Matching it deliberately: comparing a search that stopped early
+    against a grid that reported its maximum was the asymmetry that made
+    the two columns unanswerable in the first place.
+
+    Note this trusts each entry's own `is_converged` field to mean "met
+    every configured target". That is true of @evaluator's entries and --
+    since `tools/batch_warmup.py` was made to apply `check_targets` too --
+    of warm-up entries as well. Before that, warm-up flagged candidates on
+    @verifier's physical check alone, so an entry could carry
+    `is_converged=True` having never come near the accuracy target; a
+    "best among flagged" rule would have silently selected one.
+
+    `False` (including the
     `low_confidence_conclusion` case -- see state.py's field docstring)
     means no entry is known to have met the targets, so this returns the
     highest-accuracy attempt across the *entire* history instead -- a
@@ -549,7 +571,12 @@ def best_known_candidate(
     consumers, so no candidate is ever picked twice by two different
     rules."""
     if session_is_converged and candidate_history:
-        return candidate_history[-1]
+        met = [c for c in candidate_history if c.get("is_converged")]
+        # Falls back to the last entry when nothing is flagged: a caller
+        # asserting convergence over a history that records none is a
+        # contradiction this function must not resolve by inventing a
+        # winner, and the last entry is what it returned before.
+        return max(met, key=lambda c: c.get("accuracy") or 0.0) if met else candidate_history[-1]
     if candidate_history:
         return max(candidate_history, key=lambda c: c.get("accuracy") or 0.0)
     return None
