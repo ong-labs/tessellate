@@ -61,6 +61,10 @@
     max-width: 30em;
   }
   .lead strong { color: var(--text); font-weight: 700; }
+  /* Line breaks on a slide are authored, not left to the browser: at the
+     default measure this paragraph orphaned a single syllable onto its own
+     line, which reads as a typo from the back of a room. */
+  .lead.wide { max-width: 46em; }
   /* Indented continuation: marks the second line as the reason for the
      first rather than a second, equal claim. */
   .cont { display: inline-block; margin-left: 1.6em; }
@@ -108,6 +112,15 @@
 </head>
 <body>
 
+<!-- Shared SVG defs: the amber arrowhead is used by two figures, so it
+     lives here rather than inside whichever one happens to come first. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar-amber" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#e0b354"/>
+  </marker>
+</defs></svg>
+
 <div class="progress" id="progress"></div>
 
 <div class="deck">
@@ -116,23 +129,64 @@
   <section class="slide active">
     <div class="kicker">문제</div>
     <h1>AI는 전기를 많이 사용합니다.<br><span class="dim">그래서 반도체 또한 변하고 있습니다.</span></h1>
-    <p class="lead">
-      요즘 AI 반도체는 계산을 <strong>메모리 안에서 바로</strong> 합니다.<br>
-      <span class="cont">데이터를 옮기는 데 드는 전기를 아끼기 위해서입니다.</span>
-    </p>
     <div class="devices">
       <span class="dev">스마트폰</span>
       <span class="dev">스마트워치</span>
       <span class="dev">스마트 글래스</span>
-      <span class="dev-note">배터리로 도는 기기일수록 이 차이가 결정적입니다</span>
     </div>
+
+    <p class="footnote">
+      배터리로 도는 기기에서 전기는 아끼면 좋은 게 아니라,
+      <b>되느냐 안 되느냐를 가르는 조건입니다.</b>
+    </p>
+  </section>
+
+  <!-- 2 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">전기는 어디에 쓰이나</div>
+    <h1>계산보다 <span class="dim">나르는 데</span> 더 씁니다.</h1>
+    <p class="lead wide">
+      반도체 안에서는 <strong>데이터를 넣어둔 곳</strong>과 <strong>계산하는 곳</strong>이 서로 떨어져 있습니다.<br>
+      계산할 때마다 데이터를 전선을 따라 실어 보내야 합니다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 980 168" role="img"
+           aria-label="기존 반도체는 저장소와 계산기 사이를 매번 왕복하지만, 요즘 AI 반도체는 저장소 안에서 바로 계산한다">
+        <g font-family="Pretendard, 'Malgun Gothic', sans-serif" text-anchor="middle">
+          <g fill="#111821" stroke="#3d4e63">
+            <rect x="8"   y="30" width="164" height="56" rx="9"/>
+            <rect x="284" y="30" width="164" height="56" rx="9"/>
+          </g>
+          <g fill="#e6edf3" font-size="18">
+            <text x="90"  y="64">데이터 저장소</text>
+            <text x="366" y="64">계산기</text>
+          </g>
+          <g stroke="#e0b354" stroke-width="2.5" fill="none">
+            <path d="M186,48 L268,48" marker-end="url(#ar-amber)"/>
+            <path d="M268,70 L186,70" marker-end="url(#ar-amber)"/>
+          </g>
+          <text x="227" y="114" fill="#e0b354" font-size="17">매번 왕복</text>
+          <text x="227" y="142" fill="#93a4b8" font-size="15">전기를 여기서 제일 많이 씁니다</text>
+
+          <text x="504" y="66" fill="#5f6f82" font-size="28">&#8594;</text>
+
+          <g fill="#111821" stroke="#5b9dff" stroke-width="1.6">
+            <rect x="560" y="30" width="412" height="56" rx="9"/>
+          </g>
+          <text x="766" y="64" fill="#e6edf3" font-size="18">데이터 저장소 안에서 바로 계산</text>
+          <text x="766" y="114" fill="#5b9dff" font-size="17">왕복이 없습니다</text>
+          <text x="766" y="142" fill="#93a4b8" font-size="15">요즘 AI 반도체가 가는 방향</text>
+        </g>
+      </svg>
+    </figure>
 
     <p class="footnote">
       대신 조건이 하나 붙습니다 &mdash; <b>AI 모델을 반도체에 맞게 줄여서 올려야 합니다.</b>
     </p>
   </section>
 
-  <!-- 2 ─────────────────────────────────────────────────────────────── -->
+  <!-- 3 ─────────────────────────────────────────────────────────────── -->
   <section class="slide">
     <div class="kicker">그러면 "줄인다"가 무엇인가</div>
     <h1>사진 앨범을 압축한다고<br>생각하시면 됩니다.</h1>
@@ -156,7 +210,7 @@
     </p>
   </section>
 
-  <!-- 3 ─────────────────────────────────────────────────────────────── -->
+  <!-- 4 ─────────────────────────────────────────────────────────────── -->
   <section class="slide">
     <div class="kicker">왜 사람이 못 하나</div>
     <h1>손잡이가 20개입니다.</h1>
@@ -204,7 +258,7 @@
     </p>
   </section>
 
-  <!-- 4 ─────────────────────────────────────────────────────────────── -->
+  <!-- 5 ─────────────────────────────────────────────────────────────── -->
   <section class="slide">
     <div class="kicker">우리 에이전트가 하는 일</div>
     <h1>제안하고 끝나지 않습니다.<br><span class="dim">실제로 확인합니다.</span></h1>
@@ -221,10 +275,6 @@
           <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5"
                   markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="#5b9dff"/>
-          </marker>
-          <marker id="ar-amber" viewBox="0 0 10 10" refX="9" refY="5"
-                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0,0 L10,5 L0,10 z" fill="#e0b354"/>
           </marker>
         </defs>
         <g font-family="Pretendard, 'Malgun Gothic', sans-serif" font-size="18" text-anchor="middle">
