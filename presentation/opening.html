@@ -45,6 +45,25 @@
   }
   .slide.active { opacity: 1; visibility: visible; }
 
+  /* The opening slide is the one place the deck is allowed to be quiet:
+     no kicker, no supporting rows, just the name and what it does. */
+  .title-slide { justify-content: center; }
+  .course { font-size: clamp(14px, 1.45vw, 21px); color: var(--muted); font-weight: 500; }
+  h1.project {
+    font-size: clamp(44px, 7vw, 104px); font-weight: 800; letter-spacing: -.035em;
+    margin-top: clamp(14px, 2.2vh, 28px); line-height: 1;
+  }
+  .tagline {
+    margin-top: clamp(18px, 2.8vh, 36px);
+    font-size: clamp(18px, 2.1vw, 32px); line-height: 1.6; color: var(--muted);
+  }
+  .tagline b { color: var(--text); font-weight: 700; }
+  .byline {
+    margin-top: clamp(26px, 4.5vh, 60px);
+    font-size: clamp(14px, 1.4vw, 20px); color: var(--dim, #6f7f92);
+  }
+  .byline b { color: var(--muted); font-weight: 600; }
+
   .kicker {
     font-size: clamp(13px, 1.4vw, 19px); letter-spacing: .14em;
     text-transform: uppercase; color: var(--blue);
@@ -170,8 +189,19 @@
 
 <div class="deck">
 
+  <!-- 0 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide title-slide active">
+    <div class="course">[KSTA] NIPA-NVIDIA GPU 가속 기반 AI Agent 엔지니어 과정</div>
+    <h1 class="project">AutoCIM-Agent</h1>
+    <p class="tagline">
+      AI를 배터리 기기에 넣기 위한 설정을<br>
+      <b>사람 대신 찾고, 실제로 검증하는</b> 에이전트
+    </p>
+    <p class="byline">발표자 <b>이름</b> &nbsp;·&nbsp; 2026. 08. 25</p>
+  </section>
+
   <!-- 1 ─────────────────────────────────────────────────────────────── -->
-  <section class="slide active">
+  <section class="slide">
     <div class="kicker">문제</div>
     <h1>AI는 전기를 많이 사용합니다.<br><span class="dim">그래서 반도체 또한 변하고 있습니다.</span></h1>
     <div class="devices">
@@ -183,7 +213,7 @@
     </div>
 
     <p class="footnote">
-      서버에 보내서 대신 계산시키는 게 아니라, <b>기기 안에서 직접</b> 계산하는 경우입니다.<br>
+      서버에 보내서 대신 계산시키는 것이 아니라, <b>기기 안에서 직접</b> 계산하는 경우입니다.<br>
       <span class="cont">여기서 전기는 아끼면 좋은 것이 아니라,
       <b>아끼지 못하면 그 기능을 아예 넣을 수 없습니다.</b></span>
     </p>
@@ -257,7 +287,7 @@
     </div>
 
     <p class="footnote">
-      단계를 줄이면 <b>나를 숫자가 가벼워져 전기가 줄어듭니다</b> &mdash; 앞 장에서 본 그 전기입니다.<br>
+      단계를 줄이면 <b>보낼 숫자가 가벼워져 전기가 줄어듭니다</b> &mdash; 앞 장에서 본 그 전기입니다.<br>
       <span class="cont">대신 너무 줄이면 <b>AI가 알아보지 못하고</b>, 덜 줄이면 <b>전기를 낭비합니다.</b></span>
     </p>
   </section>
@@ -284,14 +314,14 @@
       </div>
       <div class="dsum">
         손잡이 두 개를 합쳐 <b>한 층에 3 &#215; 6 = 18가지</b>.<br>
-        <b>층</b>이 10개니까 <b>18 &#215; 18 &#215; &hellip; &#215; 18</b> (열 번) =
+        <b>층</b>이 10개니까 <b>18 &#215; 18 &#215; &hellip; &#215; 18</b> (10번) =
         <b class="big">3조 5,700억 가지</b>
       </div>
     </div>
 
     <p class="footnote">
       조합은 더하기가 아니라 <b>곱하기</b>라서 이렇게 불어납니다 &mdash;
-      네 자리 자물쇠도 다이얼은 <b>4개</b>뿐이지만 조합은 <b>1만 개</b>입니다.<br>
+      4자리 자물쇠도 다이얼은 <b>4개</b>뿐이지만 조합은 <b>1만 개</b>입니다.<br>
       게다가 하나를 확인하려면 실제로 학습을 다시 시켜야 합니다. <b>12초씩만 잡아도 136만 년</b>입니다.
     </p>
   </section>
@@ -302,7 +332,7 @@
     <h1>제안하고 끝내지 않습니다.<br><span class="dim">실제로 확인합니다.</span></h1>
 
     <p class="lead">
-      LLM에게 &ldquo;이 설정이 좋겠다&rdquo;는 답을 받는 건 쉽습니다.
+      LLM(ChatGPT 같은 언어 모델)에게 &ldquo;이 설정이 좋겠다&rdquo;는 답을 받는 건 쉽습니다.
       어려운 건 <strong>그 답이 실제로 맞는지 확인하는 것</strong>입니다.
     </p>
 
@@ -354,7 +384,7 @@
 
 <button class="nav prev" id="prev" aria-label="이전 슬라이드">&lsaquo;</button>
 <button class="nav next" id="next" aria-label="다음 슬라이드">&rsaquo;</button>
-<div class="counter"><span id="cur">1</span> / <span id="tot">5</span></div>
+<div class="counter"><span id="cur">1</span> / <span id="tot">6</span></div>
 
 <script>
   var slides = document.querySelectorAll('.slide');
