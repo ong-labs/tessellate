@@ -7,7 +7,12 @@ import re
 
 from graph import build_graph
 from schemas.config import HWConfig, NoCTopology
-from tools.dashboard import _pareto_front_2d, _svg_pareto_chart, render_dashboard_html
+from tools.dashboard import (
+    _pareto_front_2d,
+    _pareto_legend_html,
+    _svg_pareto_chart,
+    render_dashboard_html,
+)
 
 _PLANNER_DECISIONS = [
     {"iteration": 1, "search_tag": "LHS warm-up candidate 1/3", "used_llm": True, "rationale": "exploring the space"},
@@ -65,7 +70,10 @@ def test_render_dashboard_html_includes_pareto_chart_points_per_iteration(state_
     output = render_dashboard_html(state)
 
     assert "<svg" in output
-    assert output.count("<circle") == 2  # one point per evaluated candidate
+    # Markers are the circles carrying a <title> tooltip and so closed with
+    # </circle>; the Pareto-front ring is a separate self-closing <circle>
+    # with no tooltip, so counting "<circle" would count it as a candidate.
+    assert output.count("</circle>") == 2  # one marker per evaluated candidate
 
 
 def test_render_dashboard_html_reports_llm_call_counts(state_factory):
@@ -228,7 +236,7 @@ def test_dashboard_renders_from_a_real_stubbed_graph_run(state_factory, register
     output = render_dashboard_html(result)
 
     assert "<svg" in output
-    assert len(result["candidate_history"]) == output.count("<circle")
+    assert len(result["candidate_history"]) == output.count("</circle>")
     # every candidate_history iteration has a matching planner_decisions
     # entry, so its search_tag/rationale must show up in the rendered table
     for decision in result["planner_decisions"]:
@@ -480,3 +488,32 @@ def test_latency_keeps_significant_digits_instead_of_collapsing_to_zero(state_fa
     assert "0.000342" in output
     assert "0.000432" in output
     assert ">0.000<" not in output
+
+
+def test_pareto_front_membership_is_not_carried_by_colour_alone():
+    """Front membership is the distinction this chart exists to show, and
+    #5b9dff against #5c6b7e is only 2.00:1 -- a washed-out projector, a
+    greyscale handout, or a red-green colour vision deficiency would erase
+    it. Every front point therefore also carries a concentric ring, a shape
+    cue that survives all three.
+    """
+    rows = [
+        {"iteration": 1, "energy_pj": 100.0, "accuracy": 0.90, "pareto_rank": 1},  # front
+        {"iteration": 2, "energy_pj": 120.0, "accuracy": 0.50, "pareto_rank": 2},  # dominated
+    ]
+
+    svg = _svg_pareto_chart(rows)
+
+    # Rings are self-closing and tooltip-less; markers are closed with </circle>.
+    rings = svg.count("<circle") - svg.count("</circle>")
+    assert rings == 1  # exactly the one front point, not both, not neither
+
+
+def test_the_legend_names_the_ring_before_the_colour():
+    """A cue nobody is told about is not a cue. The legend has to state the
+    ring, not just show a blue dot and call it the front."""
+    legend = _pareto_legend_html(has_targets=False)
+
+    assert "legend-ring" in legend
+    assert "Ringed" in legend
+    assert "테두리" in legend
