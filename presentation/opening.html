@@ -118,6 +118,12 @@
   .dsum b { color: var(--text); font-weight: 700; }
   .dsum b.big { color: var(--amber); font-size: 1.25em; }
 
+  /* Smaller than .footnote: these two lines exist to head off "why those
+     numbers?" without competing with the slide's actual point. */
+  .note { margin-top: clamp(10px, 1.6vh, 18px); font-size: clamp(12px, 1.3vw, 19px);
+          color: #7d8b9d; line-height: 1.6; }
+  .note b { color: var(--muted); font-weight: 700; }
+
   .footnote {
     margin-top: clamp(16px, 2.6vh, 34px);
     font-size: clamp(14px, 1.55vw, 23px); color: var(--muted); line-height: 1.6;
@@ -257,16 +263,21 @@
         <span class="dcount">6단계</span>
       </div>
       <div class="dsum">
-        한 층에 <b>3 &#215; 6 = 18가지</b>&nbsp;&nbsp;&#183;&nbsp;&nbsp;
-        층이 10개니까 <b>18 &#215; 18 &#215; &hellip; &#215; 18</b> (열 번) =
+        손잡이 두 개를 합쳐 <b>한 층에 3 &#215; 6 = 18가지</b>.<br>
+        <b>층</b>이 10개니까 <b>18 &#215; 18 &#215; &hellip; &#215; 18</b> (열 번) =
         <b class="big">3조 5,700억 가지</b>
       </div>
     </div>
 
+    <p class="note">
+      정밀도 상한 4자리는 <b>이 반도체의 부품이 정한 값</b>입니다 &mdash; 기술이 뒤처져서가 아니라,
+      배터리 기기에 넣으려고 일부러 낮춘 것입니다.<br>
+      잘라내기는 원래 <b>연속값</b>이라 6단계는 설명을 위해 쪼갠 것입니다. 실제 조합은 이보다 많습니다.
+    </p>
+
     <p class="footnote">
-      조합은 더하기가 아니라 <b>곱하기</b>라서 이렇게 불어납니다.
-      하나를 확인하려면 실제로 학습을 다시 시켜야 하는데,
-      <b>12초씩만 잡아도 136만 년</b>입니다.
+      조합은 더하기가 아니라 <b>곱하기</b>라서 이렇게 불어납니다.<br>
+      하나를 확인하려면 실제로 학습을 다시 시켜야 하는데, <b>12초씩만 잡아도 136만 년</b>입니다.
     </p>
   </section>
 
@@ -311,7 +322,7 @@
           <path d="M865,104 L865,132 Q865,142 855,142 L120,142 Q110,142 110,132 L110,106"/>
         </g>
         <text x="487" y="163" text-anchor="middle" font-size="15" fill="#5b9dff"
-              font-family="Pretendard, 'Malgun Gothic', sans-serif">지금까지의 결과 반영 및 다음 후보 선택</text>
+              font-family="Pretendard, 'Malgun Gothic', sans-serif">지금까지의 결과를 반영한 다음 후보 선택</text>
         <!-- Branch to the human. Anchored under the arrow rather than beside
              it: set to the right of the line, the label ran past the viewBox
              and rendered as "막ㅎ" on a 16:9 screen. -->
