@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AutoCIM-Agent — 도입</title>
+<title>Tessera — 도입</title>
 <style>
   /* Palette is fixed to tools/dashboard.py's so the figures pasted in later
      sections sit on the same ground as the slide chrome around them. */
@@ -53,6 +53,12 @@
     font-size: clamp(44px, 7vw, 104px); font-weight: 800; letter-spacing: -.035em;
     margin-top: clamp(14px, 2.2vh, 28px); line-height: 1;
   }
+  /* A Latin word means nothing to this room on its own. The gloss turns it
+     into the same picture slide 4 uses, so the name carries an idea instead
+     of being decoration. */
+  .gloss { margin-top: clamp(8px, 1.2vh, 14px); font-size: clamp(14px, 1.4vw, 20px); color: var(--dim, #6f7f92); }
+  .gloss b { color: var(--muted); font-weight: 600; }
+
   .tagline {
     margin-top: clamp(18px, 2.8vh, 36px);
     font-size: clamp(18px, 2.1vw, 32px); line-height: 1.6; color: var(--muted);
@@ -192,7 +198,8 @@
   <!-- 0 ─────────────────────────────────────────────────────────────── -->
   <section class="slide title-slide active">
     <div class="course">[KSTA] NIPA-NVIDIA GPU 가속 기반 AI Agent 엔지니어 과정</div>
-    <h1 class="project">AutoCIM-Agent</h1>
+    <h1 class="project">Tessera</h1>
+    <p class="gloss">테세라 &mdash; 모자이크를 이루는 <b>낱장 타일</b></p>
     <p class="tagline">
       AI를 배터리 기기에 넣기 위한 설정을<br>
       <b>사람 대신 찾고, 실제로 검증하는</b> 에이전트
