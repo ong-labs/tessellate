@@ -26,15 +26,35 @@ def _candidate(iteration: int, accuracy: float, is_converged: bool = False) -> D
     }
 
 
-def test_best_candidate_returns_the_last_entry_when_the_session_converged():
-    # Only the session-level flag decides this -- nothing gets appended to
-    # candidate_history after the entry that made the session converge (the
-    # graph stops immediately), so the last entry is the true accepted
-    # answer regardless of which earlier entries also happen to carry their
-    # own is_converged=True (see the warm-up-poisoning test below for why
-    # per-entry flags alone are not trustworthy).
+def test_best_candidate_returns_the_best_target_meeting_entry_when_the_session_converged():
+    # This history is only reachable under a search_budget_iterations run
+    # (state.py): satisficing would have stopped at iteration 1 and never
+    # produced entries 2 and 3. Having deliberately kept searching, the
+    # answer is the best candidate that met the targets -- iteration 1 --
+    # not whichever one the budget happened to expire on.
+    #
+    # Selecting on per-entry flags is only sound because tools/batch_warmup.py
+    # now applies check_targets when it sets them; see the poisoning test
+    # below for the bug that made "last entry" the safe rule beforehand.
     history = [_candidate(1, 0.9, is_converged=True), _candidate(2, 0.3), _candidate(3, 0.5, is_converged=True)]
+    assert best_known_candidate(history, session_is_converged=True) is history[0]
+
+
+def test_best_candidate_is_the_only_flagged_entry_under_satisficing():
+    # The satisficing case the rule above has to keep reproducing exactly:
+    # the graph stops on its first hit, so exactly one entry is flagged and
+    # it is the last one. "Best of the flagged" and "the last entry" must
+    # agree here, or every ordinary run's reported answer would change.
+    history = [_candidate(1, 0.9), _candidate(2, 0.3), _candidate(3, 0.5, is_converged=True)]
     assert best_known_candidate(history, session_is_converged=True) is history[2]
+
+
+def test_best_candidate_falls_back_to_the_last_entry_when_a_converged_session_flags_nothing():
+    # A caller asserting convergence over a history recording none is a
+    # contradiction; returning the previous rule's answer keeps it a
+    # no-op rather than inventing a winner from unflagged entries.
+    history = [_candidate(1, 0.9), _candidate(2, 0.5)]
+    assert best_known_candidate(history, session_is_converged=True) is history[1]
 
 
 def test_best_candidate_falls_back_to_highest_accuracy_when_session_did_not_converge():
