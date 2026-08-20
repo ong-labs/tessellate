@@ -62,6 +62,7 @@ def run_one_replicate(
     target_latency_ms: Optional[float] = None,
     dataset_id: Optional[str] = None,
     search_strategy: str = "multi_objective",
+    search_budget_iterations: Optional[int] = None,
     allow_approximate_calibration: bool = True,
     auto_hitl: bool = True,
     auto_hitl_max_rounds: int = 5,
@@ -94,6 +95,7 @@ def run_one_replicate(
                 dataset_id=dataset_id,
                 run_seed=run_seed,
                 search_strategy=search_strategy,
+                search_budget_iterations=search_budget_iterations,
             )
             state = build_graph(checkpointer=checkpointer).get_state({"configurable": {"thread_id": thread_id}}).values
     finally:
