@@ -72,6 +72,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from nodes.evaluator import build_candidate_entry, validate_metrics
+from tools.targets import check_targets
 from nodes.planner import (
     _snapping_context,
     points_to_stage_configs,
@@ -183,6 +184,9 @@ def run_parallel_warmup(
     on_progress: Optional[Callable[[int, int], None]] = None,
     dataset_id: Optional[str] = None,
     run_seed: int = 0,
+    target_accuracy: Optional[float] = None,
+    target_energy_pj: Optional[float] = None,
+    target_latency_ms: Optional[float] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Evaluates every LHS warm-up candidate for `(model_id, hw_config)`
     concurrently and returns `(candidate_history_entries, failure_entries,
@@ -288,7 +292,26 @@ def run_parallel_warmup(
         iteration = warmup_index + 1
         validation_errors = validate_metrics(metrics)
         verifier_data = (metrics.get("verifier") or {}).get("data") or {}
-        is_converged = not validation_errors and bool(verifier_data.get("is_converged", False))
+        tuner_data = (metrics.get("tuner") or {}).get("data") or {}
+        # @verifier's physical check AND every configured target, exactly
+        # the conjunction nodes/evaluator.py applies -- a warm-up entry's
+        # `is_converged` has to mean the same thing as a sequential
+        # iteration's, because tools/search.py's best_known_candidate
+        # selects across both. Flagging on the physical check alone let a
+        # warm-up candidate that never came near the accuracy target sit in
+        # candidate_history looking converged.
+        is_converged = (
+            not validation_errors
+            and bool(verifier_data.get("is_converged", False))
+            and not check_targets(
+                tuner_data.get("accuracy"),
+                verifier_data.get("energy_pj"),
+                verifier_data.get("noc_latency_ms"),
+                target_accuracy,
+                target_energy_pj,
+                target_latency_ms,
+            )
+        )
 
         candidate_entry = build_candidate_entry(
             candidate_history, metrics, iteration, is_converged, has_validation_errors=bool(validation_errors)
