@@ -169,3 +169,31 @@ def test_run_parallel_warmup_stays_quiet_with_a_single_worker(good_hw_config, ca
     run_parallel_warmup("resnet18", good_hw_config, max_workers=1)
 
     assert "재현되지 않습니다" not in capsys.readouterr().out
+
+
+def test_run_parallel_warmup_gates_convergence_on_configured_targets(good_hw_config):
+    """A warm-up entry's `is_converged` has to mean what a sequential
+    @evaluator iteration's means -- "met @verifier's physical check *and*
+    every configured target" -- because tools/search.py's
+    best_known_candidate selects across both under a
+    `search_budget_iterations` run (state.py).
+
+    Before this, warm-up flagged candidates on the physical check alone, so
+    a candidate nowhere near the accuracy target still sat in
+    candidate_history looking converged. `good_hw_config` always passes the
+    physical check, which is exactly what isolates the target gate here.
+    """
+    candidate_history, _, _ = run_parallel_warmup("resnet18", good_hw_config, target_accuracy=1.01)
+
+    assert candidate_history  # the candidates are still recorded as surrogate data
+    # An unreachable accuracy target: physically fine, but nothing may claim
+    # to have met it.
+    assert all(entry["is_converged"] is False for entry in candidate_history)
+
+
+def test_run_parallel_warmup_still_converges_when_no_target_is_configured(good_hw_config):
+    # The default path every run without --target-* takes: the physical
+    # check alone decides, exactly as before this gate existed.
+    candidate_history, _, _ = run_parallel_warmup("resnet18", good_hw_config)
+
+    assert any(entry["is_converged"] for entry in candidate_history)
