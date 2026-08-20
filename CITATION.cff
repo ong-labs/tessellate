@@ -14,6 +14,6 @@ date-released: "2026-07-30"
 keywords:
   - compute-in-memory
   - hardware-software co-design
-  - LLM multi-agent
+  - LangGraph agentic workflow
   - neural network quantization
   - design space exploration
