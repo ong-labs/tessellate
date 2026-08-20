@@ -142,7 +142,14 @@ def run_repeated_naive_baseline(
 
 
 _DEFAULT_GRID_WEIGHT_BITS = (4, 6, 8)
-_DEFAULT_GRID_PRUNING_RATIOS = (0.0, 0.1, 0.2)
+# 0.25/0.5 included deliberately: on resnet18 over a 128-column array the
+# 0.0/0.1/0.2 sweep this used to default to never crosses a single crossbar
+# tile boundary, so `crossbar_passes` (tools/cim_physics.py) returns the
+# identical pass count for all three and the grid's energy column comes out
+# equal to the last decimal while accuracy drops -- pruning appears to be
+# pure loss because the grid never sampled a ratio that actually removes an
+# array. Costs a wider sweep (3x5 points, not 3x3).
+_DEFAULT_GRID_PRUNING_RATIOS = (0.0, 0.1, 0.2, 0.25, 0.5)
 
 
 def grid_search_points(
@@ -223,6 +230,7 @@ def compare_search_vs_baseline(
     target_latency_ms: Optional[float] = None,
     allow_approximate_calibration: bool = True,
     auto_hitl_max_rounds: int = 5,
+    search_budget_iterations: Optional[int] = None,
     weight_bits: int = _DEFAULT_BASELINE_WEIGHT_BITS,
     activation_bits: int = _DEFAULT_BASELINE_ACTIVATION_BITS,
     column_pruning_ratio: float = _DEFAULT_BASELINE_PRUNING_RATIO,
@@ -267,6 +275,7 @@ def compare_search_vs_baseline(
         search_strategy=search_strategy,
         allow_approximate_calibration=allow_approximate_calibration,
         auto_hitl_max_rounds=auto_hitl_max_rounds,
+        search_budget_iterations=search_budget_iterations,
     )
     comparison = {
         "baseline": {"results": baseline_results, "summary": summarize(baseline_results)},
@@ -362,6 +371,17 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-energy-pj", type=float, default=None)
     parser.add_argument("--target-latency-ms", type=float, default=None)
     parser.add_argument("--auto-hitl-max-rounds", type=int, default=5)
+    parser.add_argument(
+        "--search-budget-iterations",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Same meaning as main.py's flag, applied to the 'search' arm: keep "
+        "searching for N iterations and report the best target-meeting candidate, "
+        "rather than stopping at the first one. Set this to make the search arm "
+        "comparable against --grid, which always evaluates every point and reports "
+        "its best.",
+    )
     parser.add_argument("--exact-calibration-only", action="store_true")
     parser.add_argument(
         "--baseline-weight-bits", type=int, default=_DEFAULT_BASELINE_WEIGHT_BITS, metavar="BITS"
@@ -413,6 +433,7 @@ def main_cli() -> None:
         target_latency_ms=args.target_latency_ms,
         allow_approximate_calibration=not args.exact_calibration_only,
         auto_hitl_max_rounds=args.auto_hitl_max_rounds,
+        search_budget_iterations=args.search_budget_iterations,
         weight_bits=args.baseline_weight_bits,
         activation_bits=args.baseline_activation_bits,
         column_pruning_ratio=args.baseline_pruning_ratio,
