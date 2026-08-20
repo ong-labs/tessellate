@@ -345,6 +345,18 @@ def _svg_pareto_chart(
             f"3-objective rank={r.get('pareto_rank')}"
         )
         color = "#5b9dff" if on_front else "#5c6b7e"
+        if on_front:
+            # Front membership is the one distinction this chart exists to
+            # show, and it used to be carried by hue alone -- #5b9dff against
+            # #5c6b7e is only 2.00:1, so a projector washing out the blues, a
+            # greyscale handout, or a red-green colour vision deficiency
+            # erases the front entirely. This concentric ring restates it as
+            # a shape difference; the colour now reinforces rather than
+            # carries it. Drawn before the marker so it sits behind.
+            marks.append(
+                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{6.5 if warmup else 8.5:.1f}" fill="none" '
+                f'stroke="{color}" stroke-width="1.2" opacity="0.55"/>'
+            )
         if warmup:
             shape = (
                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3.5" fill="none" '
@@ -354,7 +366,10 @@ def _svg_pareto_chart(
             shape = f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{color}" opacity="0.95">'
         marks.append(f"{shape}<title>{html.escape(tooltip)}</title></circle>")
         if not warmup or r["iteration"] == last_iteration:
-            lx, ly = cx + 10, cy + 4
+            # Clear the marker's real outer edge, which the front ring above
+            # widens to 8.5px -- a fixed +10 left the digits sitting on the
+            # ring stroke rather than beside it.
+            lx, ly = cx + (12.0 if on_front else 10.0), cy + 4
             while any(abs(lx - px) < 20 and abs(ly - py) < 11 for px, py in placed_labels):
                 ly += 11
             placed_labels.append((lx, ly))
@@ -407,8 +422,12 @@ def _pareto_legend_html(has_targets: bool) -> str:
     )
     return (
         '<div class="legend">'
-        '<span class="legend-item"><span class="legend-swatch" style="background:#5b9dff"></span>'
-        f'{_bi("On the energy-accuracy Pareto front", "에너지-정확도 파레토 프론트 위의 후보")}</span>'
+        # The ring is named before the colour: it is the channel that
+        # survives a washed-out projector or a greyscale print, so a reader
+        # who cannot separate the two blues still has a stated cue.
+        '<span class="legend-item"><span class="legend-swatch legend-ring" '
+        'style="background:#5b9dff"></span>'
+        f'{_bi("Ringed: on the energy-accuracy Pareto front", "테두리 있는 점: 에너지-정확도 파레토 프론트 위의 후보")}</span>'
         '<span class="legend-item"><span class="legend-swatch" style="background:#5c6b7e"></span>'
         f'{_bi("Dominated on these two axes", "이 두 축 기준으로 피지배인 후보")}</span>'
         '<span class="legend-item"><span class="legend-swatch" '
@@ -891,6 +910,10 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
   .legend {{ display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; }}
   .legend-item {{ display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }}
   .legend-swatch {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
+  /* Mirrors the chart's own front marker: a detached concentric ring, drawn
+     with box-shadow so the swatch keeps its 10px footprint and the legend
+     row does not reflow. */
+  .legend-ring {{ box-shadow: 0 0 0 1.2px var(--bg-panel), 0 0 0 2.6px currentColor; color: #5b9dff; }}
   .meta-bar {{ display: flex; flex-wrap: wrap; gap: .5rem; margin: .9rem 0 0; }}
   .chip {{
     font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
