@@ -81,6 +81,18 @@
   .map .arrow { color: var(--muted); font-size: clamp(16px, 1.8vw, 26px); text-align: center; }
   .map .role { display: block; font-size: clamp(12px, 1.15vw, 17px); color: var(--muted); margin-top: 4px; }
 
+  /* Named devices, not an abstraction: on a plugged-in server, power is a
+     cost; on a wrist, it is whether the thing runs at all. This row is what
+     makes the constraint above binding rather than merely undesirable. */
+  .devices { display: flex; flex-wrap: wrap; align-items: center;
+             gap: clamp(8px, 1vw, 14px); margin-top: clamp(16px, 2.6vh, 32px); }
+  .dev {
+    background: var(--panel); border: 1px solid var(--blue); border-radius: 999px;
+    padding: clamp(7px, 1vh, 12px) clamp(14px, 1.4vw, 22px);
+    font-size: clamp(15px, 1.7vw, 25px); color: var(--text); font-weight: 600;
+  }
+  .dev-note { font-size: clamp(13px, 1.45vw, 21px); color: var(--muted); margin-left: .4em; }
+
   .footnote {
     margin-top: clamp(16px, 2.6vh, 34px);
     font-size: clamp(14px, 1.55vw, 23px); color: var(--muted); line-height: 1.6;
@@ -103,13 +115,20 @@
   <!-- 1 ─────────────────────────────────────────────────────────────── -->
   <section class="slide active">
     <div class="kicker">문제</div>
-    <h1>AI는 전기를 많이 사용합니다.<br><span class="dim">그래서 칩이 바뀌고 있습니다.</span></h1>
+    <h1>AI는 전기를 많이 사용합니다.<br><span class="dim">그래서 반도체 또한 변하고 있습니다.</span></h1>
     <p class="lead">
-      요즘 AI 칩은 계산을 <strong>메모리 안에서 바로</strong> 합니다.<br>
+      요즘 AI 반도체는 계산을 <strong>메모리 안에서 바로</strong> 합니다.<br>
       <span class="cont">데이터를 옮기는 데 드는 전기를 아끼기 위해서입니다.</span>
     </p>
+    <div class="devices">
+      <span class="dev">스마트폰</span>
+      <span class="dev">스마트워치</span>
+      <span class="dev">스마트 글래스</span>
+      <span class="dev-note">배터리로 도는 기기일수록 이 차이가 결정적입니다</span>
+    </div>
+
     <p class="footnote">
-      대신 조건이 하나 붙습니다 &mdash; <b>AI 모델을 칩에 맞게 줄여서 올려야 합니다.</b>
+      대신 조건이 하나 붙습니다 &mdash; <b>AI 모델을 반도체에 맞게 줄여서 올려야 합니다.</b>
     </p>
   </section>
 
