@@ -56,6 +56,26 @@ invented speculatively (Research_Plan.md's own evaluator_node sketch names
 "Target 지표 미달성" as a failure reason, implying an accuracy/energy/latency
 target was always part of the intended design, just never implemented).
 
+`search_budget_iterations` (optional, set once at session start) picks the
+run's *stopping rule*. `None` (the default, and every run before this field
+existed) is satisficing: @evaluator stops at the very first candidate that
+meets every configured target, however narrowly. Set to an integer, the
+search instead keeps going until it has spent that many iterations and
+*then* concludes with the best target-meeting candidate it saw
+(`tools.search.best_known_candidate`, recorded on `final_candidate`).
+
+The reason this is configurable rather than simply changed: satisficing
+made this project's own search-vs-grid comparison unfair, and neither rule
+is universally right. `tools/baseline_compare.py`'s grid evaluates every
+point and reports the best; the search stopped at its first hit. A seed
+that happened to clear a 0.7 accuracy target at 0.704 stopped there and was
+then compared against the grid's *maximum* over 9 fully-evaluated points --
+so "the search loses to a uniform grid" was partly an artifact of the two
+sides using different stopping rules, not a real quality gap. A budget that
+matches the grid's evaluation count makes that comparison answerable.
+Satisficing remains the right default for an ordinary run, where stopping
+as soon as the goal is met is the point.
+
 `run_seed` (default 0, set once at session start like `model_id`/`hw_spec_id`)
 lets one `(model_id, hw_spec_id)` combination be searched more than once as
 genuinely independent replicates -- `nodes/planner.py`'s `search_seed_for`
@@ -141,6 +161,13 @@ class AutoCIMState(TypedDict):
     target_accuracy: Optional[float]
     target_energy_pj: Optional[float]
     target_latency_ms: Optional[float]
+    search_budget_iterations: Optional[int]
+    # The candidate @evaluator selected as the run's answer when it stopped
+    # on an exhausted `search_budget_iterations` -- a full `candidate_history`
+    # entry, not an index, so @precision_verifier can re-check it directly.
+    # `None` in satisficing mode (the default), where the answer is
+    # `candidate_history[-1]` by construction and there is nothing to select.
+    final_candidate: Optional[Dict[str, Any]]
     iteration_count: int
     retry_count: int
     is_converged: bool
