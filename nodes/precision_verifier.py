@@ -32,12 +32,22 @@ def precision_verifier_node(state: AutoCIMState) -> Dict[str, Any]:
     metrics = state.get("metrics_store", {})
     tuner_data = (metrics.get("tuner") or {}).get("data") or {}
     verifier_data = (metrics.get("verifier") or {}).get("data") or {}
-    layer_configs = tuner_data.get("layer_configs") or []
+
+    # Under the default satisficing rule the run stops on the candidate
+    # `metrics_store` still holds, so these are the same thing. Under a
+    # `search_budget_iterations` run they are not: the search kept going
+    # past its best candidate, and `metrics_store` holds whichever one the
+    # budget happened to expire on. @evaluator records the selected answer
+    # on `final_candidate` (state.py) precisely so the expensive precise
+    # re-check is spent on the candidate actually being reported, rather
+    # than confirming (or overturning) a candidate nobody will see.
+    final_candidate = state.get("final_candidate") or {}
+    layer_configs = final_candidate.get("layer_configs") or tuner_data.get("layer_configs") or []
 
     result = precision_check_tool(
         layer_configs=layer_configs,
-        accuracy=tuner_data.get("accuracy"),
-        noc_latency_ms=verifier_data.get("noc_latency_ms"),
+        accuracy=final_candidate.get("accuracy", tuner_data.get("accuracy")),
+        noc_latency_ms=final_candidate.get("noc_latency_ms", verifier_data.get("noc_latency_ms")),
         target_accuracy=state.get("target_accuracy"),
         target_energy_pj=state.get("target_energy_pj"),
         target_latency_ms=state.get("target_latency_ms"),
