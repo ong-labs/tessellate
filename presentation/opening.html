@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoCIM-Agent — 도입</title>
+<style>
+  /* Palette is fixed to tools/dashboard.py's so the figures pasted in later
+     sections sit on the same ground as the slide chrome around them. */
+  :root {
+    --bg: #0b0f14;
+    --panel: #111821;
+    --panel-alt: #161f2b;
+    --border: #3d4e63;
+    --text: #e6edf3;
+    --muted: #93a4b8;
+    --blue: #5b9dff;
+    --amber: #e0b354;
+    /* No webfonts: this is presented from a laptop that may have no network,
+       and Latin webfonts carry no Hangul anyway -- half the deck would fall
+       back to a different face mid-sentence. Malgun Gothic ships with
+       Windows; the rest are graceful fallbacks. */
+    --sans: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--sans); overflow: hidden;
+  }
+
+  .deck { position: absolute; inset: 0; margin: auto; }
+  @media (min-width: 769px) {
+    /* Lock 16:9 and letterbox, so what is rehearsed is what is projected. */
+    .deck { max-width: calc(100vh * 16 / 9); max-height: calc(100vw * 9 / 16); }
+  }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: clamp(32px, 5vw, 80px);
+    opacity: 0; visibility: hidden; transition: opacity .35s ease;
+  }
+  .slide.active { opacity: 1; visibility: visible; }
+
+  .kicker {
+    font-size: clamp(13px, 1.4vw, 19px); letter-spacing: .14em;
+    text-transform: uppercase; color: var(--blue);
+    font-weight: 700; margin-bottom: clamp(10px, 1.6vh, 22px);
+  }
+  h1 {
+    font-size: clamp(30px, 4.4vw, 62px); line-height: 1.25;
+    font-weight: 800; letter-spacing: -.02em;
+  }
+  h1 .dim { color: var(--muted); font-weight: 700; }
+  .lead {
+    margin-top: clamp(16px, 2.6vh, 34px);
+    font-size: clamp(17px, 2.05vw, 30px); line-height: 1.65; color: var(--muted);
+    max-width: 30em;
+  }
+  .lead strong { color: var(--text); font-weight: 700; }
+  .accent { color: var(--amber); }
+
+  figure { margin-top: clamp(18px, 3vh, 40px); }
+  figure svg { width: 100%; height: auto; display: block; }
+
+  /* Slide 2 — the analogy, as a two-column mapping rather than prose. */
+  .map { display: grid; grid-template-columns: 1fr auto 1fr; gap: clamp(10px, 1.6vw, 26px);
+         align-items: center; margin-top: clamp(18px, 3vh, 40px); max-width: 60em; }
+  .map .cell {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: clamp(12px, 1.7vh, 22px) clamp(14px, 1.6vw, 26px);
+    font-size: clamp(15px, 1.75vw, 26px); line-height: 1.4;
+  }
+  .map .cell.lit { border-color: var(--blue); }
+  .map .arrow { color: var(--muted); font-size: clamp(16px, 1.8vw, 26px); text-align: center; }
+  .map .role { display: block; font-size: clamp(12px, 1.15vw, 17px); color: var(--muted); margin-top: 4px; }
+
+  .footnote {
+    margin-top: clamp(16px, 2.6vh, 34px);
+    font-size: clamp(14px, 1.55vw, 23px); color: var(--muted); line-height: 1.6;
+  }
+  .footnote b { color: var(--amber); font-weight: 700; }
+
+  /* Chrome */
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: var(--blue);
+              width: 0; transition: width .3s ease; z-index: 10; }
+  .counter { position: fixed; bottom: clamp(14px, 2.4vh, 28px); right: clamp(18px, 2.6vw, 40px);
+             font-family: var(--mono); font-size: clamp(12px, 1.15vw, 16px); color: var(--muted); z-index: 10; }
+</style>
+</head>
+<body>
+
+<div class="progress" id="progress"></div>
+
+<div class="deck">
+
+  <!-- 1 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide active">
+    <div class="kicker">문제</div>
+    <h1>AI는 전기를 많이 씁니다.<br><span class="dim">그래서 칩이 바뀌고 있습니다.</span></h1>
+    <p class="lead">
+      요즘 AI 칩은 계산을 <strong>메모리 안에서 바로</strong> 합니다.
+      데이터를 옮기는 데 드는 전기를 아끼기 위해서입니다.
+    </p>
+    <p class="footnote">
+      대신 조건이 하나 붙습니다 &mdash; <b>AI 모델을 칩에 맞게 줄여서 올려야 합니다.</b>
+    </p>
+  </section>
+
+  <!-- 2 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">그럼 "줄인다"가 뭔가</div>
+    <h1>사진 앨범을 압축한다고<br>생각하시면 됩니다.</h1>
+
+    <div class="map">
+      <div class="cell">사진 한 장<span class="role">앨범을 이루는 낱장</span></div>
+      <div class="arrow">=</div>
+      <div class="cell lit">모델의 층 하나<span class="role">AI 모델을 이루는 낱장</span></div>
+
+      <div class="cell">화질을 얼마나 낮출까<span class="role">덜 섬세하게 저장하기</span></div>
+      <div class="arrow">=</div>
+      <div class="cell lit">정밀도 (bit)<span class="role">숫자를 몇 자리로 저장할까</span></div>
+
+      <div class="cell">안 쓰는 부분을 얼마나 잘라낼까<span class="role">여백 도려내기</span></div>
+      <div class="arrow">=</div>
+      <div class="cell lit">프루닝<span class="role">덜 중요한 계산 덜어내기</span></div>
+    </div>
+
+    <p class="footnote">
+      너무 줄이면 <b>AI가 못 알아보고</b>, 덜 줄이면 <b>전기를 낭비합니다.</b>
+    </p>
+  </section>
+
+  <!-- 3 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">왜 사람이 못 하나</div>
+    <h1>손잡이가 20개입니다.</h1>
+
+    <figure>
+      <svg viewBox="0 0 980 190" role="img"
+           aria-label="10개 층 각각에 정밀도와 잘라내기 손잡이가 하나씩 있어 총 20개">
+        <text x="0" y="26" font-size="17" fill="#93a4b8"
+              font-family="Pretendard, 'Malgun Gothic', sans-serif">ResNet-18 · 층 10개</text>
+        <g font-family="ui-monospace, Consolas, monospace" font-size="13" fill="#93a4b8">
+          <text x="0" y="82">정밀도</text>
+          <text x="0" y="140">잘라내기</text>
+        </g>
+        <!-- 10 layers x 2 knobs -->
+        <g>
+          <!-- generated by hand: x = 78 + i*90 -->
+          <g fill="#5b9dff" opacity="0.9">
+            <circle cx="78"  cy="76" r="13"/><circle cx="168" cy="76" r="13"/><circle cx="258" cy="76" r="13"/>
+            <circle cx="348" cy="76" r="13"/><circle cx="438" cy="76" r="13"/><circle cx="528" cy="76" r="13"/>
+            <circle cx="618" cy="76" r="13"/><circle cx="708" cy="76" r="13"/><circle cx="798" cy="76" r="13"/>
+            <circle cx="888" cy="76" r="13"/>
+          </g>
+          <g fill="none" stroke="#e0b354" stroke-width="2.5">
+            <circle cx="78"  cy="134" r="13"/><circle cx="168" cy="134" r="13"/><circle cx="258" cy="134" r="13"/>
+            <circle cx="348" cy="134" r="13"/><circle cx="438" cy="134" r="13"/><circle cx="528" cy="134" r="13"/>
+            <circle cx="618" cy="134" r="13"/><circle cx="708" cy="134" r="13"/><circle cx="798" cy="134" r="13"/>
+            <circle cx="888" cy="134" r="13"/>
+          </g>
+          <g font-family="ui-monospace, Consolas, monospace" font-size="12" fill="#5f6f82">
+            <text x="72"  y="176">1</text><text x="162" y="176">2</text><text x="252" y="176">3</text>
+            <text x="342" y="176">4</text><text x="432" y="176">5</text><text x="522" y="176">6</text>
+            <text x="612" y="176">7</text><text x="702" y="176">8</text><text x="792" y="176">9</text>
+            <text x="879" y="176">10</text>
+          </g>
+        </g>
+      </svg>
+    </figure>
+
+    <p class="footnote">
+      문제는 손잡이를 하나 돌릴 때마다 <b>실제로 학습을 다시 시켜봐야</b> 결과를 안다는 겁니다.<br>
+      사람이 손으로 감당할 수 있는 규모가 아닙니다.
+    </p>
+  </section>
+
+  <!-- 4 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">우리 에이전트가 하는 일</div>
+    <h1>제안하고 끝나지 않습니다.<br><span class="dim">실제로 확인합니다.</span></h1>
+
+    <p class="lead">
+      LLM에게 &ldquo;이 설정이 좋겠다&rdquo;는 답을 받는 건 쉽습니다.
+      어려운 건 <strong>그 답이 실제로 맞는지 확인하는 것</strong>입니다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 980 218" role="img"
+           aria-label="제안, 학습, 물리 시뮬레이션, 판정을 반복하고, 막히면 사람에게 묻는 순환 구조">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#5b9dff"/>
+          </marker>
+          <marker id="ar-amber" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#e0b354"/>
+          </marker>
+        </defs>
+        <g font-family="Pretendard, 'Malgun Gothic', sans-serif" font-size="18" text-anchor="middle">
+          <g fill="#111821" stroke="#3d4e63">
+            <rect x="10"  y="46" width="200" height="54" rx="9"/>
+            <rect x="255" y="46" width="200" height="54" rx="9"/>
+            <rect x="500" y="46" width="220" height="54" rx="9"/>
+            <rect x="765" y="46" width="200" height="54" rx="9"/>
+          </g>
+          <g fill="#e6edf3">
+            <text x="110" y="79">후보 제안</text>
+            <text x="355" y="79">실제로 학습</text>
+            <text x="610" y="79">물리 시뮬레이션</text>
+            <text x="865" y="79">판정</text>
+          </g>
+        </g>
+        <g stroke="#5b9dff" stroke-width="2" fill="none" marker-end="url(#ar)">
+          <path d="M212,73 L251,73"/>
+          <path d="M457,73 L496,73"/>
+          <path d="M722,73 L761,73"/>
+          <!-- return loop: 판정 -> 후보 제안 -->
+          <path d="M865,104 L865,132 Q865,142 855,142 L120,142 Q110,142 110,132 L110,106"/>
+        </g>
+        <text x="487" y="163" text-anchor="middle" font-size="15" fill="#5b9dff"
+              font-family="Pretendard, 'Malgun Gothic', sans-serif">목표에 못 미치면 다시</text>
+        <!-- Branch to the human. Anchored under the arrow rather than beside
+             it: set to the right of the line, the label ran past the viewBox
+             and rendered as "막ㅎ" on a 16:9 screen. -->
+        <g stroke="#e0b354" stroke-width="2" fill="none" marker-end="url(#ar-amber)" stroke-dasharray="5 4">
+          <path d="M910,104 L910,176"/>
+        </g>
+        <text x="910" y="203" text-anchor="middle" font-size="16" fill="#e0b354"
+              font-family="Pretendard, 'Malgun Gothic', sans-serif">막히면 사람에게</text>
+      </svg>
+    </figure>
+  </section>
+
+</div>
+
+<div class="counter"><span id="cur">1</span> / <span id="tot">4</span></div>
+
+<script>
+  var slides = document.querySelectorAll('.slide');
+  var total = slides.length;
+  var current = 1;
+  document.getElementById('tot').textContent = total;
+
+  function show(n) {
+    current = Math.min(Math.max(n, 1), total);
+    slides.forEach(function (s, i) { s.classList.toggle('active', i === current - 1); });
+    document.getElementById('cur').textContent = current;
+    document.getElementById('progress').style.width = (current / total * 100) + '%';
+  }
+
+  document.addEventListener('keydown', function (e) {
+    // PageDown/PageUp included on purpose: every presenter remote sends those,
+    // not arrow keys. Without them the deck cannot be driven from a clicker.
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].indexOf(e.key) > -1) { e.preventDefault(); show(current + 1); }
+    if (['ArrowLeft', 'PageUp', 'Backspace'].indexOf(e.key) > -1) { e.preventDefault(); show(current - 1); }
+    if (e.key === 'Home') { e.preventDefault(); show(1); }
+    if (e.key === 'End') { e.preventDefault(); show(total); }
+  });
+
+  // Deliberately no click-to-advance: a stray click while presenting skips a
+  // slide with no way back on a touchpad.
+  show(1);
+</script>
+</body>
+</html>
