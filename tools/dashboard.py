@@ -865,7 +865,7 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
 <html>
 <head>
 <meta charset="utf-8">
-<title>AutoCIM-Agent report: {html.escape(title)}</title>
+<title>Tessellate report: {html.escape(title)}</title>
 <style>
   :root {{
     color-scheme: dark;
@@ -1050,7 +1050,7 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
 </head>
 <body>
 <div class="header-row">
-  <h1>AutoCIM-Agent report</h1>
+  <h1>Tessellate report</h1>
   <div class="lang-toggle" role="group" aria-label="Language / 언어">
     <button type="button" class="lang-btn active" data-setlang="en" onclick="setDashboardLang('en')">EN</button>
     <button type="button" class="lang-btn" data-setlang="ko" onclick="setDashboardLang('ko')">한국어</button>
