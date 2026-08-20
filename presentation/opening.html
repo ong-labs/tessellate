@@ -97,6 +97,15 @@
   }
   .dev-note { font-size: clamp(13px, 1.45vw, 21px); color: var(--muted); margin-left: .4em; }
 
+  /* The knob count alone reads as small -- "twenty, just try them". These
+     three numbers are what actually rule a human out, so they get the
+     weight rather than sitting inside a sentence. */
+  .stats { display: flex; flex-wrap: wrap; gap: clamp(12px, 2vw, 34px);
+           margin-top: clamp(16px, 2.6vh, 32px); }
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+  .stat b { font-size: clamp(22px, 2.9vw, 44px); color: var(--amber); font-weight: 800; line-height: 1.1; }
+  .stat span { font-size: clamp(12px, 1.3vw, 19px); color: var(--muted); }
+
   .footnote {
     margin-top: clamp(16px, 2.6vh, 34px);
     font-size: clamp(14px, 1.55vw, 23px); color: var(--muted); line-height: 1.6;
@@ -133,12 +142,12 @@
       <span class="dev">스마트폰</span>
       <span class="dev">스마트워치</span>
       <span class="dev">스마트 글래스</span>
-      <span class="dev-note">그 밖에 배터리로 작동하는 기기 전부</span>
+      <span class="dev-note">그 밖에 배터리만으로 AI를 돌려야 하는 기기</span>
     </div>
 
     <p class="footnote">
       여기서 전기는 아끼면 좋은 것이 아니라,
-      <b>못 아끼면 그 기능을 아예 넣을 수 없습니다.</b>
+      <b>아끼지 못하면 그 기능을 아예 넣을 수 없습니다.</b>
     </p>
   </section>
 
@@ -184,7 +193,8 @@
 
     <p class="footnote">
       대신 조건이 하나 붙습니다 &mdash; <b>AI 모델을 이 반도체에 맞게 줄여서 올려야 합니다.</b><br>
-      <span class="cont">AI 모델은 AI가 학습으로 만들어낸 숫자 덩어리입니다.
+      <span class="cont">AI 모델은 학습으로 얻어낸 수많은 숫자입니다 &mdash;
+      사진도 소리도 반도체 안에서는 전부 숫자가 됩니다.<br>
       그러면 &ldquo;줄인다&rdquo;는 건 무엇일까요?</span>
     </p>
   </section>
@@ -255,8 +265,14 @@
       </svg>
     </figure>
 
+    <div class="stats">
+      <div class="stat"><b>3조 5,700억</b><span>손잡이 20개를 조합하는 경우의 수</span></div>
+      <div class="stat"><b>실제 학습</b><span>조합 하나를 확인하는 방법</span></div>
+      <div class="stat"><b>136만 년</b><span>하나에 12초로 잡고 전부 해볼 때</span></div>
+    </div>
+
     <p class="footnote">
-      문제는 손잡이를 하나 돌릴 때마다 <b>실제로 학습을 다시 시켜봐야</b> 결과를 안다는 겁니다.<br>
+      손잡이마다 <b>눈금이 여러 칸</b>이라 조합이 이렇게 불어납니다.
       사람이 손으로 감당할 수 있는 규모가 아닙니다.
     </p>
   </section>
