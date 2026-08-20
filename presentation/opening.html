@@ -135,6 +135,24 @@
               width: 0; transition: width .3s ease; z-index: 10; }
   .counter { position: fixed; bottom: clamp(14px, 2.4vh, 28px); right: clamp(18px, 2.6vw, 40px);
              font-family: var(--mono); font-size: clamp(12px, 1.15vw, 16px); color: var(--muted); z-index: 10; }
+
+  /* Hidden on anything with a real pointer: a laptop drives this from the
+     keyboard or a clicker, and buttons on the projected image are noise.
+     Touch devices have neither, so they get them. */
+  .nav { display: none; }
+  @media (hover: none) and (pointer: coarse) {
+    .nav {
+      display: grid; place-items: center;
+      position: fixed; bottom: 18px; z-index: 10;
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); font-size: 26px; line-height: 1;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .nav.prev { left: 18px; }
+    .nav.next { left: 82px; }
+  }
+  .nav:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 </style>
 </head>
 <body>
@@ -161,7 +179,7 @@
       <span class="dev">스마트워치</span>
       <span class="dev">스마트 글래스</span>
       <span class="dev">무선 이어폰</span>
-      <span class="dev-note">그 밖에 배터리만으로 AI를 돌려야 하는 기기</span>
+      <span class="dev-note">이 밖에 배터리만으로 AI를 돌려야 하는 기기</span>
     </div>
 
     <p class="footnote">
@@ -221,7 +239,7 @@
 
   <!-- 3 ─────────────────────────────────────────────────────────────── -->
   <section class="slide">
-    <div class="kicker">그러면 "줄인다"가 무엇인가</div>
+    <div class="kicker">그럼 "줄인다"가 무엇인가</div>
     <h1>사진 앨범을 압축한다고<br>생각하시면 됩니다.</h1>
 
     <div class="map">
@@ -334,7 +352,9 @@
 
 </div>
 
-<div class="counter"><span id="cur">1</span> / <span id="tot">4</span></div>
+<button class="nav prev" id="prev" aria-label="이전 슬라이드">&lsaquo;</button>
+<button class="nav next" id="next" aria-label="다음 슬라이드">&rsaquo;</button>
+<div class="counter"><span id="cur">1</span> / <span id="tot">5</span></div>
 
 <script>
   var slides = document.querySelectorAll('.slide');
@@ -358,8 +378,24 @@
     if (e.key === 'End') { e.preventDefault(); show(total); }
   });
 
-  // Deliberately no click-to-advance: a stray click while presenting skips a
-  // slide with no way back on a touchpad.
+  document.getElementById('prev').addEventListener('click', function () { show(current - 1); });
+  document.getElementById('next').addEventListener('click', function () { show(current + 1); });
+
+  // Swipe, for phones and tablets. Threshold is generous so a scroll or a
+  // tap never counts as a page turn.
+  var startX = null;
+  document.addEventListener('touchstart', function (e) {
+    startX = e.changedTouches[0].clientX;
+  }, { passive: true });
+  document.addEventListener('touchend', function (e) {
+    if (startX === null) return;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dx) > 60) show(current + (dx < 0 ? 1 : -1));
+    startX = null;
+  }, { passive: true });
+
+  // Deliberately no click-to-advance on desktop: a stray click while
+  // presenting skips a slide with no way back on a touchpad.
   show(1);
 </script>
 </body>
