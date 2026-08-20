@@ -103,15 +103,20 @@ def build_graph(checkpointer: Optional[BaseCheckpointSaver] = None) -> CompiledS
             # final by itself, only a trigger for the (rare, expensive)
             # precise re-check.
             "Converged (Done)": "precision_verifier",
+            # Only a `search_budget_iterations` run reaches this from
+            # @evaluator -- see evaluator_router. Same destination and same
+            # reasoning as hitl_router's identically-named outcome.
+            "Concluded (low confidence)": END,
             "HITL Interrupt": "hitl_human_approval",
             "Re-plan with History": "planner",
         },
     )
     workflow.add_conditional_edges(
         "precision_verifier",
-        evaluator_router,  # same three outcomes, same state fields -- see module docstring
+        evaluator_router,  # same outcomes, same state fields -- see module docstring
         {
             "Converged (Done)": END,
+            "Concluded (low confidence)": END,
             "HITL Interrupt": "hitl_human_approval",
             "Re-plan with History": "planner",
         },
