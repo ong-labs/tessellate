@@ -419,77 +419,77 @@
     <p class="lead wide">앞에서는 네 단계로 줄여 보여드렸습니다. 실제로 도는 구조는 이렇습니다.</p>
 
     <figure>
-      <svg viewBox="0 76 1200 214" role="img"
+      <svg viewBox="0 70 1296 282" role="img"
            aria-label="후보 제안부터 정밀 재검증까지 이어지고, 두 가지 물리 계산은 동시에 돌며, 판정과 정밀 재검증 모두 되돌아가거나 사람을 부를 수 있고, 정밀 재검증만 종료로 간다">
         <g font-family="Pretendard, 'Malgun Gothic', sans-serif" text-anchor="middle">
 
           <g fill="#111821" stroke="#3d4e63">
-            <rect x="0"    y="115" width="175" height="48" rx="9"/>
-            <rect x="205"  y="115" width="175" height="48" rx="9"/>
-            <rect x="410"  y="85"  width="175" height="44" rx="9"/>
-            <rect x="410"  y="147" width="175" height="44" rx="9"/>
-            <rect x="615"  y="115" width="175" height="48" rx="9"/>
-            <rect x="820"  y="115" width="175" height="48" rx="9"/>
-            <rect x="1025" y="115" width="175" height="48" rx="9"/>
+            <rect x="6"    y="120" width="175" height="52" rx="9"/>
+            <rect x="211"  y="120" width="175" height="52" rx="9"/>
+            <rect x="456"  y="78"  width="175" height="48" rx="9"/>
+            <rect x="456"  y="170" width="175" height="48" rx="9"/>
+            <rect x="701"  y="120" width="175" height="52" rx="9"/>
+            <rect x="906"  y="120" width="175" height="52" rx="9"/>
+            <rect x="1111" y="120" width="175" height="52" rx="9"/>
           </g>
           <g fill="#e6edf3" font-size="19">
-            <text x="87"   y="145">후보 제안</text>
-            <text x="292"  y="145">양자화 &#183; 재학습</text>
-            <text x="497"  y="113">배치&#183;이동 계산</text>
-            <text x="497"  y="175">전력&#183;시간 계산</text>
-            <text x="702"  y="145">물리 검증</text>
-            <text x="907"  y="145">판정</text>
-            <text x="1112" y="145">정밀 재검증</text>
+            <text x="94"   y="152">후보 제안</text>
+            <text x="299"  y="152">양자화 &#183; 재학습</text>
+            <text x="544"  y="108">배치&#183;이동 계산</text>
+            <text x="544"  y="200">전력&#183;시간 계산</text>
+            <text x="789"  y="152">물리 검증</text>
+            <text x="994"  y="152">판정</text>
+            <text x="1199" y="152">정밀 재검증</text>
           </g>
 
-          <!-- Orthogonal split/merge rather than curves: an S-curve fanning
-               out and back in reads as two wires crossing, which is exactly
-               what this is not. -->
+          <!-- The split and merge get a 70-unit lane of their own. Squeezed
+               into the old 30-unit gap, the stub, the vertical and the
+               arrowhead piled onto each other and read as crossing wires. -->
           <g stroke="#5b9dff" stroke-width="2" fill="none">
-            <path d="M175,139 H199" marker-end="url(#ar-blue)"/>
-            <path d="M380,139 H395"/>
-            <path d="M395,107 V169"/>
-            <path d="M395,107 H404" marker-end="url(#ar-blue)"/>
-            <path d="M395,169 H404" marker-end="url(#ar-blue)"/>
-            <path d="M585,107 H600"/>
-            <path d="M585,169 H600"/>
-            <path d="M600,107 V169"/>
-            <path d="M600,139 H609" marker-end="url(#ar-blue)"/>
-            <path d="M790,139 H814" marker-end="url(#ar-blue)"/>
-            <path d="M995,139 H1019" marker-end="url(#ar-blue)"/>
+            <path d="M181,146 H205" marker-end="url(#ar-blue)"/>
+            <path d="M386,146 H411"/>
+            <path d="M411,102 V194"/>
+            <path d="M411,102 H450" marker-end="url(#ar-blue)"/>
+            <path d="M411,194 H450" marker-end="url(#ar-blue)"/>
+            <path d="M631,102 H676"/>
+            <path d="M631,194 H676"/>
+            <path d="M676,102 V194"/>
+            <path d="M676,146 H695" marker-end="url(#ar-blue)"/>
+            <path d="M876,146 H900" marker-end="url(#ar-blue)"/>
+            <path d="M1081,146 H1105" marker-end="url(#ar-blue)"/>
           </g>
 
-          <!-- Both 판정 and 정밀 재검증 feed the same return lane: the router
-               that decides retry / call-a-human / done is literally the same
-               function for both nodes. -->
+          <!-- Both 판정 and 정밀 재검증 feed one return lane: the router that
+               decides retry / call-a-human / done is the same function for
+               both nodes. 판정 leaves from its centre. -->
           <g stroke="#5b9dff" stroke-width="2" fill="none">
-            <path d="M1060,163 V196 Q1060,200 1056,200 L121,200 Q117,200 117,196 V169"
+            <path d="M1136,172 V248 Q1136,252 1132,252 L98,252 Q94,252 94,248 V176"
                   marker-end="url(#ar-blue)"/>
-            <path d="M860,163 V200"/>
+            <path d="M994,172 V252"/>
           </g>
-          <text x="400" y="222" font-size="16" fill="#5b9dff">결과를 반영해 다음 후보</text>
+          <text x="420" y="274" font-size="16" fill="#5b9dff">결과를 반영해 다음 후보</text>
 
           <!-- 정밀 재검증 is the only step that can finish -->
           <g stroke="#5b9dff" stroke-width="2" fill="none">
-            <path d="M1160,163 V224" marker-end="url(#ar-blue)"/>
+            <path d="M1199,172 V282" marker-end="url(#ar-blue)"/>
           </g>
           <g fill="#111821" stroke="#5b9dff">
-            <rect x="1025" y="230" width="175" height="48" rx="9"/>
+            <rect x="1111" y="288" width="175" height="52" rx="9"/>
           </g>
-          <text x="1112" y="260" font-size="19" fill="#e6edf3">종료</text>
+          <text x="1199" y="320" font-size="19" fill="#e6edf3">종료</text>
 
-          <!-- ...or the same return can pull a person in instead -->
+          <!-- ...or the same return pulls a person in instead -->
           <g stroke="#e0b354" stroke-width="2" fill="none" stroke-dasharray="5 4"
              marker-end="url(#ar-amber)">
-            <path d="M700,200 V224"/>
-            <path d="M615,254 H61 Q57,254 57,250 V169"/>
+            <path d="M789,252 V282"/>
+            <path d="M701,314 H44 Q40,314 40,310 V176"/>
           </g>
           <g fill="#111821" stroke="#e0b354">
-            <rect x="615" y="230" width="175" height="48" rx="9"/>
+            <rect x="701" y="288" width="175" height="52" rx="9"/>
           </g>
-          <text x="702" y="260" font-size="19" fill="#e6edf3">사람에게 질문</text>
-          <text x="714" y="219" font-size="16" fill="#e0b354" text-anchor="start">막히면</text>
-          <text x="336" y="276" font-size="16" fill="#e0b354">사람이 새 범위를 정해줌</text>
+          <text x="789" y="320" font-size="19" fill="#e6edf3">사람에게 질문</text>
+          <text x="801" y="272" font-size="16" fill="#e0b354" text-anchor="start">막히면</text>
+          <text x="370" y="336" font-size="16" fill="#e0b354">사람이 새 범위를 정해줌</text>
         </g>
       </svg>
     </figure>
