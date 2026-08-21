@@ -164,6 +164,11 @@
           color: #7d8b9d; line-height: 1.6; }
   .note b { color: var(--muted); font-weight: 700; }
 
+  .annots { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 21px; }
+  .annot { font-size: 20px; color: var(--muted); line-height: 1.5;
+           border-left: 3px solid var(--blue); padding-left: 14px; }
+  .annot b { color: var(--text); font-weight: 700; }
+
   .footnote {
     margin-top: 21px;
     font-size: 23px; color: var(--muted); line-height: 1.6;
@@ -203,6 +208,10 @@
   <marker id="ar-amber" viewBox="0 0 10 10" refX="9" refY="5"
           markerWidth="7" markerHeight="7" orient="auto-start-reverse">
     <path d="M0,0 L10,5 L0,10 z" fill="#e0b354"/>
+  </marker>
+  <marker id="ar-blue" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#5b9dff"/>
   </marker>
 </defs></svg>
 
@@ -403,13 +412,82 @@
     </figure>
   </section>
 
+  <!-- 7 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">시스템 구조</div>
+    <h1>실제로는 여덟 단계입니다.</h1>
+    <p class="lead wide">앞에서는 네 단계로 줄여 보여드렸습니다. 실제로 도는 구조는 이렇습니다.</p>
+
+    <figure>
+      <svg viewBox="0 76 1200 214" role="img"
+           aria-label="후보 제안부터 정밀 재검증까지 여덟 단계가 순환하며, 배치 계산과 전력 계산은 동시에 돌고, 막히면 사람에게 질문한다">
+        <g font-family="Pretendard, 'Malgun Gothic', sans-serif" text-anchor="middle">
+
+          <g fill="#111821" stroke="#3d4e63">
+            <rect x="0"    y="115" width="175" height="48" rx="9"/>
+            <rect x="205"  y="115" width="175" height="48" rx="9"/>
+            <rect x="410"  y="85"  width="175" height="44" rx="9"/>
+            <rect x="410"  y="147" width="175" height="44" rx="9"/>
+            <rect x="615"  y="115" width="175" height="48" rx="9"/>
+            <rect x="820"  y="115" width="175" height="48" rx="9"/>
+            <rect x="1025" y="115" width="175" height="48" rx="9"/>
+          </g>
+          <g fill="#e6edf3" font-size="19">
+            <text x="87"   y="145">후보 제안</text>
+            <text x="292"  y="145">실제 학습</text>
+            <text x="497"  y="113">배치·이동 계산</text>
+            <text x="497"  y="175">전력·시간 계산</text>
+            <text x="702"  y="145">물리 검증</text>
+            <text x="907"  y="145">판정</text>
+            <text x="1112" y="145">정밀 재검증</text>
+          </g>
+
+          <!-- main flow, including the fan-out that runs the two physics
+               calculations at the same time and folds them back together -->
+          <g stroke="#5b9dff" stroke-width="2" fill="none" marker-end="url(#ar-blue)">
+            <path d="M175,139 H199"/>
+            <path d="M380,139 C395,139 395,107 404,107"/>
+            <path d="M380,139 C395,139 395,169 404,169"/>
+            <path d="M585,107 C600,107 600,139 609,139"/>
+            <path d="M585,169 C600,169 600,139 609,139"/>
+            <path d="M790,139 H814"/>
+            <path d="M995,139 H1019"/>
+          </g>
+
+          <!-- the ordinary loop -->
+          <g stroke="#5b9dff" stroke-width="2" fill="none" marker-end="url(#ar-blue)">
+            <path d="M860,163 V196 Q860,200 856,200 L121,200 Q117,200 117,196 V169"/>
+          </g>
+          <text x="488" y="222" font-size="16" fill="#5b9dff">결과를 반영해 다음 후보</text>
+
+          <!-- the human branch -->
+          <g stroke="#e0b354" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#ar-amber)">
+            <path d="M950,163 V224"/>
+            <path d="M820,254 H61 Q57,254 57,250 V169"/>
+          </g>
+          <g fill="#111821" stroke="#e0b354">
+            <rect x="820" y="230" width="175" height="48" rx="9"/>
+          </g>
+          <text x="907" y="260" font-size="19" fill="#e6edf3">사람에게 질문</text>
+          <text x="430" y="276" font-size="16" fill="#e0b354">사람이 새 범위를 정해줌</text>
+        </g>
+      </svg>
+    </figure>
+
+    <div class="annots">
+      <div class="annot"><b>두 갈래가 동시에</b> 돌아갑니다</div>
+      <div class="annot"><b>막히면 스스로 멈추고</b> 사람을 부릅니다</div>
+      <div class="annot"><b>끝났다고 판단해도</b> 한 번 더 확인합니다</div>
+    </div>
+  </section>
+
 </div>
 </div>
 </div>
 
 <button class="nav prev" id="prev" aria-label="이전 슬라이드">&lsaquo;</button>
 <button class="nav next" id="next" aria-label="다음 슬라이드">&rsaquo;</button>
-<div class="counter"><span id="cur">1</span> / <span id="tot">6</span></div>
+<div class="counter"><span id="cur">1</span> / <span id="tot">7</span></div>
 
 <script>
   var slides = document.querySelectorAll('.slide');
