@@ -416,88 +416,94 @@
   <section class="slide">
     <div class="kicker">시스템 구조</div>
     <h1>실제로는 여덟 단계입니다.</h1>
-    <p class="lead wide">앞에서는 네 단계로 줄여 보여드렸습니다. 실제로 도는 구조는 이렇습니다.</p>
+    <p class="lead wide">앞에서는 네 단계로 줄여서 보여드렸습니다. 실제 구조는 이렇습니다.</p>
 
     <figure>
-      <svg viewBox="0 70 1296 282" role="img"
-           aria-label="후보 제안부터 정밀 재검증까지 이어지고, 두 가지 물리 계산은 동시에 돌며, 판정과 정밀 재검증 모두 되돌아가거나 사람을 부를 수 있고, 정밀 재검증만 종료로 간다">
+      <svg viewBox="0 56 1296 344" role="img"
+           aria-label="설정 하나를 고르고, 그 설정으로 학습하고, 칩 위 배치와 전력을 동시에 계산하고, 전기적으로 가능한지 검증하고, 목표 만족 여부를 판정한 뒤 더 정확한 계산으로 재확인한다. 못 미치면 되돌아가거나 사람에게 탐색 범위를 묻는다.">
         <g font-family="Pretendard, 'Malgun Gothic', sans-serif" text-anchor="middle">
 
           <g fill="#111821" stroke="#3d4e63">
-            <rect x="6"    y="120" width="175" height="52" rx="9"/>
-            <rect x="211"  y="120" width="175" height="52" rx="9"/>
-            <rect x="456"  y="78"  width="175" height="48" rx="9"/>
-            <rect x="456"  y="170" width="175" height="48" rx="9"/>
-            <rect x="701"  y="120" width="175" height="52" rx="9"/>
-            <rect x="906"  y="120" width="175" height="52" rx="9"/>
-            <rect x="1111" y="120" width="175" height="52" rx="9"/>
+            <rect x="6"    y="132" width="175" height="66" rx="9"/>
+            <rect x="211"  y="132" width="175" height="66" rx="9"/>
+            <rect x="456"  y="64"  width="175" height="62" rx="9"/>
+            <rect x="456"  y="200" width="175" height="62" rx="9"/>
+            <rect x="701"  y="132" width="175" height="66" rx="9"/>
+            <rect x="906"  y="132" width="175" height="66" rx="9"/>
+            <rect x="1111" y="132" width="175" height="66" rx="9"/>
           </g>
+          <!-- Every box was a bare name. A viewer reading the slide without
+               the narration got nothing from "물리 검증" or "배치·이동 계산",
+               so each carries the same one-line gloss slide 4 uses. -->
           <g fill="#e6edf3" font-size="19">
-            <text x="94"   y="152">후보 제안</text>
-            <text x="299"  y="152">양자화 &#183; 재학습</text>
-            <text x="544"  y="108">배치&#183;이동 계산</text>
-            <text x="544"  y="200">전력&#183;시간 계산</text>
-            <text x="789"  y="152">물리 검증</text>
-            <text x="994"  y="152">판정</text>
-            <text x="1199" y="152">정밀 재검증</text>
+            <text x="94"   y="164">후보 제안</text>
+            <text x="299"  y="164">양자화 &#183; 재학습</text>
+            <text x="544"  y="94">배치&#183;이동 계산</text>
+            <text x="544"  y="230">전력&#183;시간 계산</text>
+            <text x="789"  y="164">물리 검증</text>
+            <text x="994"  y="164">판정</text>
+            <text x="1199" y="164">정밀 재검증</text>
+          </g>
+          <g fill="#93a4b8" font-size="14">
+            <text x="94"   y="186">설정 하나를 고름</text>
+            <text x="299"  y="186">그 설정으로 학습</text>
+            <text x="544"  y="116">칩 위 배치와 이동량</text>
+            <text x="544"  y="252">전기와 걸리는 시간</text>
+            <text x="789"  y="186">전기적으로 가능한가</text>
+            <text x="994"  y="186">목표를 만족했나</text>
+            <text x="1199" y="186">더 정확한 계산으로</text>
           </g>
 
-          <!-- The split and merge get a 70-unit lane of their own. Squeezed
-               into the old 30-unit gap, the stub, the vertical and the
-               arrowhead piled onto each other and read as crossing wires. -->
           <g stroke="#5b9dff" stroke-width="2" fill="none">
-            <path d="M181,146 H205" marker-end="url(#ar-blue)"/>
-            <path d="M386,146 H411"/>
-            <path d="M411,102 V194"/>
-            <path d="M411,102 H450" marker-end="url(#ar-blue)"/>
-            <path d="M411,194 H450" marker-end="url(#ar-blue)"/>
-            <path d="M631,102 H676"/>
-            <path d="M631,194 H676"/>
-            <path d="M676,102 V194"/>
-            <path d="M676,146 H695" marker-end="url(#ar-blue)"/>
-            <path d="M876,146 H900" marker-end="url(#ar-blue)"/>
-            <path d="M1081,146 H1105" marker-end="url(#ar-blue)"/>
+            <path d="M181,165 H205" marker-end="url(#ar-blue)"/>
+            <path d="M386,165 H411"/>
+            <path d="M411,95 V231"/>
+            <path d="M411,95 H450" marker-end="url(#ar-blue)"/>
+            <path d="M411,231 H450" marker-end="url(#ar-blue)"/>
+            <path d="M631,95 H676"/>
+            <path d="M631,231 H676"/>
+            <path d="M676,95 V231"/>
+            <path d="M676,165 H695" marker-end="url(#ar-blue)"/>
+            <path d="M876,165 H900" marker-end="url(#ar-blue)"/>
+            <path d="M1081,165 H1105" marker-end="url(#ar-blue)"/>
           </g>
 
-          <!-- Both 판정 and 정밀 재검증 feed one return lane: the router that
-               decides retry / call-a-human / done is the same function for
-               both nodes. 판정 leaves from its centre. -->
           <g stroke="#5b9dff" stroke-width="2" fill="none">
-            <path d="M1136,172 V248 Q1136,252 1132,252 L98,252 Q94,252 94,248 V176"
+            <path d="M1136,198 V286 Q1136,290 1132,290 L98,290 Q94,290 94,286 V202"
                   marker-end="url(#ar-blue)"/>
-            <path d="M994,172 V252"/>
+            <path d="M994,198 V290"/>
           </g>
-          <text x="420" y="274" font-size="16" fill="#5b9dff">결과를 반영해 다음 후보</text>
+          <text x="420" y="312" font-size="16" fill="#5b9dff">지금까지 측정값을 보고 다음 설정을</text>
 
-          <!-- 정밀 재검증 is the only step that can finish -->
           <g stroke="#5b9dff" stroke-width="2" fill="none">
-            <path d="M1199,172 V282" marker-end="url(#ar-blue)"/>
+            <path d="M1199,198 V320" marker-end="url(#ar-blue)"/>
           </g>
           <g fill="#111821" stroke="#5b9dff">
-            <rect x="1111" y="288" width="175" height="52" rx="9"/>
+            <rect x="1111" y="326" width="175" height="66" rx="9"/>
           </g>
-          <text x="1199" y="320" font-size="19" fill="#e6edf3">종료</text>
+          <text x="1199" y="358" font-size="19" fill="#e6edf3">종료</text>
+          <text x="1199" y="380" font-size="14" fill="#93a4b8">사람이 검토할 후보</text>
 
-          <!-- ...or the same return pulls a person in instead -->
           <g stroke="#e0b354" stroke-width="2" fill="none" stroke-dasharray="5 4"
              marker-end="url(#ar-amber)">
-            <path d="M789,252 V282"/>
-            <path d="M701,314 H44 Q40,314 40,310 V176"/>
+            <path d="M789,290 V320"/>
+            <path d="M701,359 H44 Q40,359 40,355 V202"/>
           </g>
           <g fill="#111821" stroke="#e0b354">
-            <rect x="701" y="288" width="175" height="52" rx="9"/>
+            <rect x="701" y="326" width="175" height="66" rx="9"/>
           </g>
-          <text x="789" y="320" font-size="19" fill="#e6edf3">사람에게 질문</text>
-          <text x="801" y="272" font-size="16" fill="#e0b354" text-anchor="start">막히면</text>
-          <text x="370" y="336" font-size="16" fill="#e0b354">사람이 새 범위를 정해줌</text>
+          <text x="789" y="358" font-size="19" fill="#e6edf3">사람에게 질문</text>
+          <text x="789" y="380" font-size="14" fill="#93a4b8">탐색 범위를 좁혀줌</text>
+          <text x="801" y="310" font-size="16" fill="#e0b354" text-anchor="start">목표를 계속 못 맞추면</text>
+          <text x="370" y="382" font-size="16" fill="#e0b354">사람이 정해준 범위로</text>
         </g>
       </svg>
     </figure>
 
     <div class="annots">
-      <div class="annot"><b>두 갈래가 동시에</b> 돌아갑니다</div>
-      <div class="annot"><b>막히면 스스로 멈추고</b> 사람을 부릅니다</div>
-      <div class="annot"><b>끝났다고 판단해도</b> 한 번 더 확인합니다</div>
+      <div class="annot"><b>두 갈래가 동시에</b> 작동합니다.</div>
+      <div class="annot"><b>막히면 스스로 멈추고</b> 사람을 부릅니다.</div>
+      <div class="annot"><b>끝났다고 판단해도</b> 한 번 더 확인합니다.</div>
     </div>
   </section>
 
