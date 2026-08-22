@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tessellate</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230a0e13%22/%3E%3Crect x=%226%22 y=%226%22 width=%229%22 height=%229%22 rx=%222%22 fill=%22%235b9dff%22/%3E%3Crect x=%2217%22 y=%226%22 width=%229%22 height=%229%22 rx=%222%22 fill=%22%235b9dff%22/%3E%3Crect x=%226%22 y=%2217%22 width=%229%22 height=%229%22 rx=%222%22 fill=%22%235b9dff%22/%3E%3Crect x=%2217%22 y=%2217%22 width=%229%22 height=%229%22 rx=%222%22 fill=%22%23e0b354%22/%3E%3C/svg%3E">
+<style>
+  /* Palette is fixed to tools/dashboard.py's so the figures pasted in later
+     sections sit on the same ground as the slide chrome around them. */
+  :root {
+    --bg: #0b0f14;
+    --panel: #111821;
+    --panel-alt: #161f2b;
+    --border: #3d4e63;
+    --text: #e6edf3;
+    --muted: #93a4b8;
+    --blue: #5b9dff;
+    --amber: #e0b354;
+    /* No webfonts: this is presented from a laptop that may have no network,
+       and Latin webfonts carry no Hangul anyway -- half the deck would fall
+       back to a different face mid-sentence. Malgun Gothic ships with
+       Windows; the rest are graceful fallbacks. */
+    --sans: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", system-ui, sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--sans);
+  }
+  /* `safe center` centres the deck while it fits and falls back to
+     start-alignment once it does not, so a zoomed-in slide can still be
+     scrolled to its top-left corner instead of being cut off there. */
+  .stage { min-height: 100%; display: grid; place-content: safe center; }
+  /* The scaled deck's layout box, so scrollbars know its real size --
+     a transform alone leaves the box at its unscaled dimensions. */
+  .deck-box { width: calc(1456px * var(--fit, 1)); height: calc(819px * var(--fit, 1)); }
+
+  /* Fixed 1456x819 canvas (exactly 16:9), scaled to fit whatever screen it
+     lands on. Sizing slide text in vw meant every clamp() hit its ceiling
+     around 1465px, so on a 1920 projector the type stayed the same physical
+     size while the slide grew -- the extra width became dead margin instead
+     of legibility for the back row. Against a fixed canvas the whole slide
+     scales together, so the projected image matches the rehearsed one at
+     any resolution. */
+  .deck {
+    position: relative;
+    width: 1456px; height: 819px;
+    transform: scale(var(--fit, 1));
+    transform-origin: 0 0;
+  }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 73px;
+    opacity: 0; visibility: hidden; transition: opacity .35s ease;
+  }
+  .slide.active { opacity: 1; visibility: visible; }
+
+  /* The opening slide is the one place the deck is allowed to be quiet:
+     no kicker, no supporting rows, just the name and what it does. */
+  .title-slide { justify-content: center; }
+  .course { font-size: 21px; color: var(--muted); font-weight: 500; }
+  h1.project {
+    font-size: 102px; font-weight: 800; letter-spacing: -.035em;
+    margin-top: 18px; line-height: 1;
+  }
+  /* A Latin word means nothing to this room on its own. The gloss turns it
+     into the same picture slide 4 uses, so the name carries an idea instead
+     of being decoration. */
+  .gloss { margin-top: 10px; font-size: 20px; color: var(--dim, #6f7f92); }
+  .gloss b { color: var(--muted); font-weight: 600; }
+
+  .tagline {
+    margin-top: 23px;
+    font-size: 31px; line-height: 1.6; color: var(--muted);
+  }
+  .tagline b { color: var(--text); font-weight: 700; }
+  .byline {
+    margin-top: 37px;
+    font-size: 20px; color: var(--dim, #6f7f92);
+  }
+  .byline b { color: var(--muted); font-weight: 600; }
+
+  .kicker {
+    font-size: 19px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--blue);
+    font-weight: 700; margin-bottom: 13px;
+  }
+  h1 {
+    font-size: 62px; line-height: 1.25;
+    font-weight: 800; letter-spacing: -.02em;
+  }
+  h1 .dim { color: var(--muted); font-weight: 700; }
+  .lead {
+    margin-top: 21px;
+    font-size: 30px; line-height: 1.65; color: var(--muted);
+    max-width: 30em;
+  }
+  .lead strong { color: var(--text); font-weight: 700; }
+  /* Line breaks on a slide are authored, not left to the browser: at the
+     default measure this paragraph orphaned a single syllable onto its own
+     line, which reads as a typo from the back of a room. */
+  .lead.wide { max-width: 46em; }
+  /* Indented continuation: marks the second line as the reason for the
+     first rather than a second, equal claim. */
+  .cont { display: inline-block; margin-left: 1.6em; }
+  .accent { color: var(--amber); }
+
+  figure { margin-top: 25px; }
+  figure svg { width: 100%; height: auto; display: block; }
+
+  /* Slide 2 — the analogy, as a two-column mapping rather than prose. */
+  .map { display: grid; grid-template-columns: 1fr auto 1fr; gap: 23px;
+         align-items: center; margin-top: 25px; max-width: 60em; }
+  .map .cell {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 23px;
+    font-size: 25px; line-height: 1.4;
+  }
+  .map .cell.lit { border-color: var(--blue); }
+  .map .arrow { color: var(--muted); font-size: 26px; text-align: center; }
+  .map .role { display: block; font-size: 17px; color: var(--muted); margin-top: 4px; }
+
+  /* Named devices, not an abstraction: on a plugged-in server, power is a
+     cost; on a wrist, it is whether the thing runs at all. This row is what
+     makes the constraint above binding rather than merely undesirable. */
+  .devices { display: flex; flex-wrap: wrap; align-items: center;
+             gap: 14px; margin-top: 21px; }
+  .dev {
+    background: var(--panel); border: 1px solid var(--blue); border-radius: 999px;
+    padding: 8px 20px;
+    font-size: 25px; color: var(--text); font-weight: 600;
+  }
+  .dev-note { font-size: 21px; color: var(--muted); margin-left: .4em; }
+
+  /* The knob count alone reads as small -- "twenty, just try them". These
+     three numbers are what actually rule a human out, so they get the
+     weight rather than sitting inside a sentence. */
+  /* "손잡이 20개" reads as small, and asserting a trillion-scale number
+     without showing where it comes from reads as made up. This block does
+     the arithmetic on screen: the count per layer, then the multiplication
+     across layers. */
+  .derive { margin-top: 21px; display: flex; flex-direction: column;
+            gap: 11px; }
+  .drow { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+  .dlabel { font-size: 21px; color: var(--muted); min-width: 9em; }
+  .tick { font-family: var(--mono); font-size: 20px;
+          background: var(--panel); border: 1px solid var(--blue); border-radius: 6px;
+          padding: 3px 11px; color: var(--text); }
+  .tick.amber { border-color: var(--amber); }
+  .dcount { font-size: 21px; color: var(--muted); margin-left: .4em; }
+  .dsum { font-size: 23px; color: var(--muted);
+          margin-top: 7px; }
+  .dsum b { color: var(--text); font-weight: 700; }
+  .dsum b.big { color: var(--amber); font-size: 1.25em; }
+
+  /* Smaller than .footnote: these two lines exist to head off "why those
+     numbers?" without competing with the slide's actual point. */
+  .note { margin-top: 13px; font-size: 19px;
+          color: #7d8b9d; line-height: 1.6; }
+  .note b { color: var(--muted); font-weight: 700; }
+
+  .annots { display: flex; flex-wrap: wrap; gap: 26px; margin-top: 21px; }
+  .annot { font-size: 20px; color: var(--muted); line-height: 1.5;
+           border-left: 3px solid var(--blue); padding-left: 14px; }
+  .annot b { color: var(--text); font-weight: 700; }
+
+  .footnote {
+    margin-top: 21px;
+    font-size: 23px; color: var(--muted); line-height: 1.6;
+  }
+  .footnote b { color: var(--amber); font-weight: 700; }
+
+  /* Chrome */
+  .progress { position: fixed; top: 0; left: 0; height: 3px; background: var(--blue);
+              width: 0; transition: width .3s ease; z-index: 10; }
+  .counter { position: fixed; bottom: clamp(14px, 2.4vh, 28px); right: clamp(18px, 2.6vw, 40px);
+             font-family: var(--mono); font-size: clamp(12px, 1.15vw, 16px); color: var(--muted); z-index: 10; }
+
+  /* Hidden on anything with a real pointer: a laptop drives this from the
+     keyboard or a clicker, and buttons on the projected image are noise.
+     Touch devices have neither, so they get them. */
+  .nav { display: none; }
+  @media (hover: none) and (pointer: coarse) {
+    .nav {
+      display: grid; place-items: center;
+      position: fixed; bottom: 18px; z-index: 10;
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); font-size: 26px; line-height: 1;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .nav.prev { left: 18px; }
+    .nav.next { left: 82px; }
+  }
+  .nav:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+
+  /* Slide 8 -- the reversal block. Three rows carrying the same action with
+     opposite predicted outcomes, so the contradiction is visible from the
+     back of the room rather than something the audience has to read for.
+     Deliberately NOT color-coded alone: each row is labelled in words
+     (상황 / LLM의 답 / 실제로는) and the pills spell out the direction, so
+     the point survives a projector with bad color and a reader who can't
+     separate the amber from the blue. Pills use --sans, never --mono: the
+     mono stack (Consolas) carries no Hangul, so mixed pills would render
+     the Korean at fallback width with broken tracking. */
+  .rewind { margin-top: 22px; display: flex; flex-direction: column; gap: 10px; max-width: 76em; }
+  .rrow {
+    display: grid; grid-template-columns: 6.4em 1fr auto;
+    align-items: center; gap: 20px;
+    background: var(--panel);
+    border: 1px solid var(--border); border-left: 4px solid var(--border);
+    border-radius: 10px; padding: 11px 22px;
+  }
+  .rrow.bad  { border-left-color: var(--amber); }
+  .rrow.real { border-left-color: var(--blue); }
+  .rlabel { font-size: 18px; font-weight: 700; color: var(--muted); }
+  .rrow.bad  .rlabel { color: var(--amber); }
+  .rrow.real .rlabel { color: var(--blue); }
+  .rtext { font-size: 25px; line-height: 1.45; color: var(--muted); }
+  .rtext b { color: var(--text); font-weight: 700; }
+  .rform { display: flex; gap: 8px; }
+  .rform span {
+    font-size: 19px; white-space: nowrap; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px;
+  }
+  .rform .up   { border-color: var(--amber); color: var(--amber); }
+  .rform .down { border-color: var(--blue);  color: var(--blue); }
+  .punch { margin-top: 20px; font-size: 30px; line-height: 1.5; color: var(--muted); }
+  .punch b { color: var(--amber); font-weight: 700; }
+
+  /* Slide 9 -- who decides what. Amber for the LLM's two remaining jobs is
+     the same amber slide 7 gives the "사람에게 질문" box: in this deck amber
+     means "a human needs to look", not "wrong" -- so flagging an anomaly
+     reads as a real job, not a demotion, while the numbers stay blue with
+     the search that actually computes them. */
+  .owner { margin-top: 22px; display: flex; flex-direction: column; gap: 10px; max-width: 46em; }
+  .orow { display: grid; grid-template-columns: 1fr 40px 8.4em; align-items: center; gap: 14px; }
+  .owhat {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 22px;
+    font-size: 25px; color: var(--muted);
+  }
+  .oarrow { text-align: center; color: var(--muted); font-size: 26px; }
+  .owho {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 0;
+    font-size: 25px; font-weight: 700; text-align: center;
+  }
+  .owho.search { border-color: var(--blue);  color: var(--blue); }
+  .owho.llm    { border-color: var(--amber); color: var(--amber); }
+
+  /* Slide 10 -- three stills from one real run. The terminal blocks hold no
+     Hangul on purpose: --mono (Consolas) carries no Korean glyphs, so any
+     Hangul inside would fall back mid-line and break the column alignment
+     that makes CLI output readable. All Korean lives in .clabel on --sans. */
+  .cuts { margin-top: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .cut { display: grid; grid-template-columns: 272px 1fr; gap: 18px; align-items: center; }
+  .clabel {
+    display: grid; grid-template-columns: 30px 1fr; column-gap: 10px; align-items: center;
+    font-size: 23px; font-weight: 700; color: var(--text); line-height: 1.35;
+  }
+  .cnum {
+    display: grid; place-items: center; width: 30px; height: 30px;
+    border-radius: 999px; background: var(--blue); color: #06101f;
+    font-size: 18px; font-weight: 800;
+  }
+  .csub { grid-column: 2; font-size: 19px; font-weight: 500; color: var(--muted); margin-top: 2px; }
+  .term {
+    margin: 0; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 11px 20px;
+    font-family: var(--mono); font-size: 16px; line-height: 1.4;
+    color: var(--muted); white-space: pre; overflow-x: auto;
+  }
+  .term .c { color: var(--blue); font-weight: 700; }
+  .term .k { color: var(--amber); font-weight: 700; }
+
+
+  /* Slide 12 -- the three things being compared. Only our own card is
+     outlined in blue and carries a struck-through rule: the fairness fix
+     changed our side, not theirs, and the strikethrough is what says so
+     without a sentence. Amber on the strike line (not the text colour) so
+     the correction reads as a correction rather than as an error. */
+  .rivals { margin-top: 26px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .rival {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 22px;
+  }
+  .rival.ours { border-color: var(--blue); }
+  .rname { font-size: 27px; font-weight: 800; color: var(--text); letter-spacing: -.01em; }
+  .rival.ours .rname { color: var(--blue); }
+  .rspec { margin-top: 8px; font-size: 20px; color: var(--dim, #6f7f92); }
+  .rspec s { text-decoration-color: var(--amber); text-decoration-thickness: 2px; }
+  /* keep-all: Korean wraps mid-word by default, which orphaned a syllable
+     ("기준점입 / 니다") in every card. Breaking only at spaces fixes it
+     without rewording the sentences. */
+  .rtag { font-size: 16px; font-weight: 700; letter-spacing: .06em; color: var(--dim, #6f7f92); margin-bottom: 6px; }
+  .rival.ours .rtag { color: var(--blue); }
+  .freedom { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 13px; }
+  .fdlab { font-size: 20px; color: var(--dim, #6f7f92); word-break: keep-all; }
+  .fdrow { margin-top: 7px; display: grid; grid-template-columns: 4.5em 1fr auto; gap: 16px; align-items: baseline; }
+  .fdwho { font-size: 23px; font-weight: 800; color: var(--muted); }
+  .fdrow.ours .fdwho { color: var(--blue); }
+  .fdwhat { font-size: 22px; color: var(--muted); word-break: keep-all; min-width: 0; }
+  .fdwhat b { color: var(--text); font-weight: 700; }
+  .fdnum { font-family: var(--mono); font-size: 24px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+  .fdrow.ours .fdnum { color: var(--blue); }
+  .rrule { margin-top: 13px; font-size: 22px; line-height: 1.45; color: var(--muted); word-break: keep-all; }
+  .rrule b { color: var(--text); font-weight: 700; }
+
+
+  /* Slide 14 -- the claim we could have made, struck, against what the
+     measurements actually support. Same amber strike as slide 12's rival
+     card, so a struck line reads consistently across the deck as "we
+     corrected this ourselves" rather than as an error marker. */
+  .honest {
+    margin-top: 24px; max-width: 76em;
+    display: grid; grid-template-columns: 20.5em 1fr; gap: 0 26px; align-items: center;
+  }
+  .hhead { font-size: 18px; font-weight: 700; letter-spacing: .1em; padding-bottom: 9px; color: var(--dim, #6f7f92); }
+  .hhead.r { color: var(--blue); }
+  .hclaim {
+    font-size: 24px; color: #6f7f92; padding: 14px 0;
+    border-top: 1px solid var(--border); word-break: keep-all;
+  }
+  .hclaim s { text-decoration-color: var(--amber); text-decoration-thickness: 2px; }
+  .htruth {
+    font-size: 24px; line-height: 1.4; color: var(--muted); padding: 14px 0;
+    border-top: 1px solid var(--border); word-break: keep-all;
+  }
+  .htruth b { color: var(--text); font-weight: 700; }
+
+  /* Slide 15 -- the closer. Deliberately quieter than the dense middle of
+     the deck: no card fills, just a rule above each item, so the last thing
+     on screen has air around it. Numerals are outlined rather than filled
+     (slide 10's .cnum is filled) because these are things not yet done. */
+  .remain { margin-top: 26px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+  .ritem { border-top: 2px solid var(--border); padding-top: 16px; }
+  .rnum {
+    display: grid; place-items: center; width: 34px; height: 34px;
+    border: 2px solid var(--blue); border-radius: 999px;
+    color: var(--blue); font-size: 19px; font-weight: 800;
+  }
+  .rtitle { margin-top: 13px; font-size: 26px; font-weight: 700; color: var(--text); word-break: keep-all; }
+  .rbody { margin-top: 9px; font-size: 21px; line-height: 1.5; color: var(--muted); word-break: keep-all; }
+  .rbody b { color: var(--amber); font-weight: 700; }
+
+  /* Slide 13 -- the result. Bar widths are literal pixels in proportion to
+     the two energy figures (520 : 485 = 538,265 : 501,683), so the bar
+     understates nothing and exaggerates nothing: a 6.8% gap looks like a
+     6.8% gap. The delta badge carries the number for anyone at the back who
+     cannot read a 35px difference. */
+  .result {
+    margin-top: 24px;
+    display: grid; grid-template-columns: 155px 6.5em 1fr;
+    gap: 14px 24px; align-items: center;
+  }
+  .rhead { font-size: 18px; font-weight: 700; letter-spacing: .08em; color: var(--dim, #6f7f92); }
+  .rlab { font-size: 25px; color: var(--muted); word-break: keep-all; }
+  .rlab.ours { color: var(--blue); font-weight: 700; }
+  .rval { font-family: var(--mono); font-size: 25px; color: var(--muted); }
+  .rval.ours { color: var(--text); font-weight: 700; }
+  .rbar { display: flex; align-items: center; gap: 16px; }
+  .rbar .fill { height: 26px; border-radius: 5px; background: #253242; flex: none; }
+  .rbar.ours .fill { background: var(--blue); }
+  .rlab.missed { color: var(--amber); font-weight: 700; }
+  .rval.missed { color: var(--amber); font-weight: 700; }
+  .rbar.missed .fill { background: var(--amber); }
+  .rbar.missed b { color: var(--text); }
+  .rbar.missed .rdelta { color: var(--amber); border-color: var(--amber); }
+  .rbar b { font-family: var(--mono); font-size: 21px; font-weight: 700; color: var(--muted); }
+  .rbar.ours b { color: var(--text); }
+  .rdelta {
+    font-size: 20px; font-weight: 800; color: var(--blue);
+    border: 1px solid var(--blue); border-radius: 999px; padding: 3px 13px; white-space: nowrap;
+  }
+
+  /* Slide 11 -- the report. The hero is not the dashboard's Pareto scatter
+     (131 of 150 candidates land in a 4% energy band, so it renders as an
+     unreadable blob at this scale and belongs in the handout, not on a
+     projector) but the one panel that carries the deck's whole posture: the
+     run started on a borrowed literature figure and replaced it with its own
+     measurement, and the report says so. */
+  /* Slide 11 scrolls inside itself. The deck's canvas is a fixed 1456x819
+     box, so a slide cannot be taller than that -- but it can carry its own
+     scrollport. Past the first screenful sits the live report, embedded in
+     the deck. Nothing on screen hints at it, which is the point: the deck
+     looks finished until it isn't. Arrow Up/Down and the wheel are free --
+     the deck's own nav is bound to Left/Right/PageUp/PageDown/Space. */
+  .slide-scroll { padding: 0; display: block; }
+  .slide-scroll .scroller {
+    height: 100%; overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .slide-scroll .scroller::-webkit-scrollbar { width: 0; height: 0; }
+  .slide-scroll .page {
+    min-height: 819px; box-sizing: border-box; padding: 73px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  /* The frame has to clear the deck's own fixed chrome, which floats above
+     it: the 3px progress bar at the top and the page counter at the bottom
+     right. At 0/44 padding the border came within 3px of the bar and 11px of
+     the counter, so the report read as boxed-in and clipped rather than
+     placed. 22/60 leaves both edges visibly free. */
+  .slide-scroll .reveal { height: 819px; box-sizing: border-box; padding: 22px 73px 60px; }
+  .slide-scroll .reveal iframe {
+    display: block; width: 100%; height: 100%; border: 1px solid var(--border);
+    border-radius: 12px; background: var(--bg);
+  }
+  .report { margin-top: 24px; display: grid; grid-template-columns: 15em 1fr; gap: 18px; align-items: stretch; }
+  .rpanel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 22px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .rpanel.wide { border-color: var(--blue); }
+  .rptitle { font-size: 19px; font-weight: 700; color: var(--text); word-break: keep-all; }
+  .rpanel.wide .rptitle { color: var(--blue); }
+  .rplist { margin: 12px 0 0; padding: 0; list-style: none; }
+  .rplist li { font-size: 21px; line-height: 1.75; color: var(--muted); }
+  .rplist li b { color: var(--text); font-weight: 700; }
+  .rplist .gl { display: block; font-size: 16px; color: #6f7f92; }
+  .rplead { margin: 10px 0 0; font-size: 20px; line-height: 1.45; color: var(--muted); word-break: keep-all; }
+  .rplead b { color: var(--text); font-weight: 700; }
+
+  .cal { margin-top: 14px; display: grid; grid-template-columns: 7em 1fr 9em; gap: 10px 20px; align-items: center; }
+  .cwhen { font-size: 20px; font-weight: 700; color: var(--dim, #6f7f92); }
+  /* min-width:0 -- a grid item defaults to min-width:auto, so this 1fr
+     column refused to shrink below its text and squeezed the auto-sized
+     .cnum column from 135px down to 30px, clipping the numbers. */
+  .cwhat { font-size: 23px; color: var(--muted); word-break: keep-all; min-width: 0; }
+  .csrc { display: block; font-size: 17px; color: #6f7f92; margin-top: 2px; }
+  /* .cval, not .cnum -- slide 10 already owns .cnum as a 30px round
+     badge, and reusing it here clamped these numbers to 30px wide. */
+  .cval {
+    font-family: var(--mono); font-size: 25px; font-weight: 700;
+    color: var(--muted); white-space: nowrap; text-align: right;
+  }
+  .cval.ours { color: var(--blue); }
+  .rpnote { margin: 14px 0 0; font-size: 21px; color: var(--muted); word-break: keep-all; }
+  .rpnote b { color: var(--amber); font-weight: 700; }
+
+  /* Slide 16 -- closes the question slide 1 opened. Two rows only: what was
+     given up and what came back. The deck spent fifteen slides earning the
+     right to answer in four numbers, so nothing else belongs here. */
+  .answer { margin-top: 28px; display: flex; flex-direction: column; gap: 14px; max-width: 60em; }
+  .arow {
+    display: grid; grid-template-columns: 8em 11em 1fr; align-items: center; gap: 24px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-left: 4px solid var(--border); border-radius: 12px; padding: 18px 24px;
+  }
+  .arow.gain { border-left-color: var(--blue); }
+  .alab { font-size: 19px; font-weight: 700; color: var(--dim, #6f7f92); }
+  .arow.gain .alab { color: var(--blue); }
+  .aval { font-size: 27px; color: var(--muted); white-space: nowrap; }
+  .aval b { color: var(--text); font-weight: 800; }
+  .arow.gain .aval b { color: var(--blue); }
+  .anote { font-size: 21px; color: var(--muted); word-break: keep-all; }
+  .anote b { color: var(--text); font-weight: 700; }
+  /* The field's own vocabulary, placed after the plain-language answer and
+     before the closing line. A lay listener reads it as a credential and
+     moves on; anyone who knows the area gets the precise name for what they
+     just watched. Terms are lifted verbatim from docs/concepts.md's glossary
+     so the deck and the docs cannot drift apart. */
+  .field {
+    margin-top: 24px; border-left: 3px solid var(--border); padding-left: 20px;
+    max-width: 62em;
+  }
+  .ftitle { font-size: 18px; font-weight: 700; letter-spacing: .06em; color: var(--dim, #6f7f92); }
+  .fbody { margin: 9px 0 0; font-size: 22px; line-height: 1.5; color: var(--muted); word-break: keep-all; }
+  .fbody b { color: var(--text); font-weight: 700; }
+  .fsub { margin: 7px 0 0; font-size: 19px; line-height: 1.5; color: #6f7f92; word-break: keep-all; }
+  .fsub b { color: var(--muted); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<!-- Shared SVG defs: the amber arrowhead is used by two figures, so it
+     lives here rather than inside whichever one happens to come first. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="ar-amber" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#e0b354"/>
+  </marker>
+  <marker id="ar-blue" viewBox="0 0 10 10" refX="9" refY="5"
+          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0,0 L10,5 L0,10 z" fill="#5b9dff"/>
+  </marker>
+</defs></svg>
+
+<div class="progress" id="progress"></div>
+
+<div class="stage">
+<div class="deck-box">
+<div class="deck">
+
+  <!-- 0 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide title-slide active">
+    <div class="course">[KSTA] NIPA-NVIDIA GPU 가속 기반 AI Agent 엔지니어 과정</div>
+    <h1 class="project">Tessellate</h1>
+    <p class="tagline">
+      AI를 손목 위에서 돌리려면 무엇을 포기해야 할까요?<br>
+      <b>답을 찾고, 실제로 검증합니다.</b>
+    </p>
+    <p class="byline">발표자 <b>옹예준</b> &nbsp;·&nbsp; 2026. 08. 25.</p>
+  </section>
+
+  <!-- 1 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">문제</div>
+    <h1>AI는 전기를 많이 사용합니다.<br><span class="dim">그래서 반도체 또한 변화하고 있습니다.</span></h1>
+    <div class="devices">
+      <span class="dev">스마트폰</span>
+      <span class="dev">스마트워치</span>
+      <span class="dev">스마트 글래스</span>
+      <span class="dev">무선 이어폰</span>
+      <span class="dev-note">이 밖에 배터리만으로 AI를 돌려야 하는 기기</span>
+    </div>
+
+    <p class="footnote">
+      서버에 보내지 않고, <b>기기 안에서 직접</b> 계산하는 경우입니다.<br>
+      <span class="cont">여기서의 전기는 아끼면 좋은 것이 아니라,
+      <b>아끼지 못하면 그 기능을 아예 넣을 수 없습니다.</b></span>
+    </p>
+  </section>
+
+  <!-- 2 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">전기는 어디에 쓰이나</div>
+    <h1>계산보다 <span class="dim">옮기는 것에</span> 더 사용합니다.</h1>
+    <p class="lead wide">
+      반도체 안에서는 <strong>데이터를 저장한 곳</strong>과 <strong>계산하는 곳</strong>이 서로 떨어져 있습니다.<br>
+      계산할 때마다 데이터를 전선으로 옮겨야 합니다.
+    </p>
+
+    <figure>
+      <svg viewBox="0 -10 980 178" role="img"
+           aria-label="기존 반도체는 저장소와 계산기 사이를 매번 왕복하지만, 요즘 AI 반도체는 저장소 안에서 바로 계산한다">
+        <g font-family="Pretendard, 'Malgun Gothic', sans-serif" text-anchor="middle">
+          <g fill="#111821" stroke="#3d4e63">
+            <rect x="8"   y="30" width="164" height="56" rx="9"/>
+            <rect x="284" y="30" width="164" height="56" rx="9"/>
+          </g>
+          <g fill="#e6edf3" font-size="18">
+            <text x="90"  y="64">데이터 저장소</text>
+            <text x="366" y="64">계산기</text>
+          </g>
+          <g stroke="#e0b354" stroke-width="2.5" fill="none">
+            <path d="M186,48 L268,48" marker-end="url(#ar-amber)"/>
+            <path d="M268,70 L186,70" marker-end="url(#ar-amber)"/>
+          </g>
+          <text x="227" y="114" fill="#e0b354" font-size="17">매번 왕복</text>
+          <text x="227" y="142" fill="#93a4b8" font-size="15">전기 최다 사용 구간</text>
+
+          <text x="504" y="66" fill="#5f6f82" font-size="28">&#8594;</text>
+
+          <g fill="#111821" stroke="#5b9dff" stroke-width="1.6">
+            <rect x="560" y="30" width="412" height="56" rx="9"/>
+          </g>
+          <text x="766" y="8" fill="#93a4b8" font-size="15">저장된 숫자에 전기를 흘려 그 자리에서 곱하고 더합니다.</text>
+          <text x="766" y="64" fill="#e6edf3" font-size="18">데이터 저장소 안에서 바로 계산</text>
+          <text x="766" y="114" fill="#5b9dff" font-size="17">왕복 없음</text>
+          <text x="766" y="142" fill="#93a4b8" font-size="15">요즘 AI 반도체가 가는 방향</text>
+        </g>
+      </svg>
+    </figure>
+
+    <p class="footnote">
+      대신 조건이 하나 붙습니다. <b>AI 모델을 이 반도체에 맞게 줄여서 올려야 합니다.</b><br>
+      <span class="cont">AI 모델은 학습으로 얻어낸 수많은 숫자이며,
+      사진도 소리도 반도체 안에서는 전부 숫자가 됩니다.<br>
+      그러면 &ldquo;줄인다&rdquo;는 것은 무엇일까요?</span>
+    </p>
+  </section>
+
+  <!-- 3 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">그럼 "줄인다"가 무엇인가</div>
+    <h1>사진 앨범을 압축한다고<br>생각하시면 됩니다.</h1>
+
+    <div class="map">
+      <div class="cell">사진 한 장<span class="role">앨범을 이루는 낱장</span></div>
+      <div class="arrow">=</div>
+      <div class="cell lit">모델의 층 하나<span class="role">AI 모델을 이루는 낱장</span></div>
+
+      <div class="cell">화질을 얼마나 낮출까<span class="role">덜 섬세하게 저장하기</span></div>
+      <div class="arrow">=</div>
+      <div class="cell lit">정밀도 (bit)<span class="role">4비트면 16단계 (2&times;2&times;2&times;2)</span></div>
+
+      <div class="cell">공간을 얼마나 잘라낼까<span class="role">용량 최적화하기</span></div>
+      <div class="arrow">=</div>
+      <div class="cell lit">프루닝<span class="role">중요하지 않은 계산 제외</span></div>
+    </div>
+
+    <p class="footnote">
+      단계를 줄이면 <b>보낼 숫자가 가벼워져 전기 사용량이 줄어듭니다.</b><br>
+      <span class="cont">그러나 과하게 줄이면 <b>AI가 알아보지 못하고</b>, 덜 줄이면 <b>전기를 낭비합니다.</b></span>
+    </p>
+  </section>
+
+  <!-- 4 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">왜 사람이 못 하나</div>
+    <h1>손잡이가 20개입니다.</h1>
+    <p class="lead wide">
+      층마다 <strong>두 개씩</strong> &mdash; 얼마나 줄일지, 그리고 얼마나 잘라낼지.<br>
+      그런데 손잡이마다 <strong>눈금이 여러 칸</strong>입니다.
+    </p>
+
+    <div class="derive">
+      <div class="drow">
+        <span class="dlabel">한 층의 정밀도</span>
+        <span class="tick">2</span><span class="tick">3</span><span class="tick">4</span><span class="tick">5</span><span class="tick">6</span><span class="tick">7</span>
+        <span class="dcount">6가지</span>
+      </div>
+      <div class="drow">
+        <span class="dlabel">한 층의 프루닝</span>
+        <span class="tick amber">0</span><span class="tick amber">0.1</span><span class="tick amber">0.2</span><span class="tick amber">0.3</span><span class="tick amber">0.4</span><span class="tick amber">0.5</span>
+        <span class="dcount">6단계</span>
+      </div>
+      <div class="dsum">
+        손잡이 두 개를 합쳐 <b>한 층에 6 &#215; 6 = 36가지</b>.<br>
+        <b>층</b>이 10개니까 <b>36 &#215; 36 &#215; &hellip; &#215; 36</b> (10번) =
+        <b class="big">3,656,158,440,062,976 가지</b>
+      </div>
+    </div>
+
+    <p class="footnote">
+      조합은 더하기가 아니라 <b>곱하기</b>라서 이렇게 불어납니다.
+      4자리 자물쇠도 다이얼은 <b>4개</b>뿐이지만 조합은 <b>1만 개</b>입니다.<br>
+      게다가 하나를 확인하려면 실제로 학습을 다시 시켜야 합니다.<br>
+      <b>1분만 잡아도 6,951,400,183년</b>입니다 &mdash; <b>지구 나이(45억 년)보다 깁니다.</b>
+    </p>
+  </section>
+
+  <!-- 5 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">이 에이전트가 하는 일</div>
+    <h1>제안하고 끝내지 않습니다.<br><span class="dim">실제로 검증합니다.</span></h1>
+
+    <p class="lead">
+      LLM에게 &ldquo;이 설정이 좋겠다&rdquo;는 답을 받는 것은 쉽습니다.<br>
+      <span class="cont">어려운 것은 <strong>그 답이 실제로 맞는지 검증하는 것</strong>입니다.</span>
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 980 218" role="img"
+           aria-label="제안, 학습, 물리 검증, 판정을 반복하고, 막히면 사람에게 묻는 순환 구조">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#5b9dff"/>
+          </marker>
+        </defs>
+        <g font-family="Pretendard, 'Malgun Gothic', sans-serif" font-size="18" text-anchor="middle">
+          <g fill="#111821" stroke="#3d4e63">
+            <rect x="10"  y="46" width="200" height="54" rx="9"/>
+            <rect x="255" y="46" width="200" height="54" rx="9"/>
+            <rect x="500" y="46" width="220" height="54" rx="9"/>
+            <rect x="765" y="46" width="200" height="54" rx="9"/>
+          </g>
+          <g fill="#e6edf3">
+            <text x="110" y="79">후보 제안</text>
+            <text x="355" y="79">실제 학습</text>
+            <text x="610" y="79">물리 검증</text>
+            <text x="865" y="79">판정</text>
+          </g>
+        </g>
+        <g stroke="#5b9dff" stroke-width="2" fill="none" marker-end="url(#ar)">
+          <path d="M212,73 L251,73"/>
+          <path d="M457,73 L496,73"/>
+          <path d="M722,73 L761,73"/>
+          <!-- return loop: 판정 -> 후보 제안 -->
+          <path d="M865,104 L865,132 Q865,142 855,142 L120,142 Q110,142 110,132 L110,106"/>
+        </g>
+        <text x="487" y="163" text-anchor="middle" font-size="15" fill="#5b9dff"
+              font-family="Pretendard, 'Malgun Gothic', sans-serif">지금까지의 결과를 반영한 다음 후보 선택</text>
+        <!-- Branch to the human. Anchored under the arrow rather than beside
+             it: set to the right of the line, the label ran past the viewBox
+             and rendered as "막ㅎ" on a 16:9 screen. -->
+        <g stroke="#e0b354" stroke-width="2" fill="none" marker-end="url(#ar-amber)" stroke-dasharray="5 4">
+          <path d="M910,104 L910,176"/>
+        </g>
+        <text x="910" y="203" text-anchor="middle" font-size="16" fill="#e0b354"
+              font-family="Pretendard, 'Malgun Gothic', sans-serif">막히면 사람에게</text>
+      </svg>
+    </figure>
+  </section>
+
+  <!-- 7 ─────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">시스템 구조</div>
+    <h1>실제로는 여덟 단계입니다.</h1>
+    <p class="lead wide">앞에서는 네 단계로 줄여서 보여드렸습니다. 실제 구조는 이렇습니다.</p>
+
+    <figure>
+      <svg viewBox="0 56 1296 344" role="img"
+           aria-label="설정 하나를 고르고, 설정값으로 학습하고, 칩 내부의 배치와 전기를 동시에 계산하고, 값이 뭉개지지 않는지 검증하고, 목표 도달 여부를 판정한 뒤 더 정확한 계산으로 재확인한다. 세 번 연속 실패하면 사람에게 탐색 범위를 묻는다.">
+        <g font-family="Pretendard, 'Malgun Gothic', sans-serif" text-anchor="middle">
+
+          <g fill="#111821" stroke="#3d4e63">
+            <rect x="6"    y="132" width="175" height="66" rx="9"/>
+            <rect x="211"  y="132" width="175" height="66" rx="9"/>
+            <rect x="456"  y="64"  width="175" height="62" rx="9"/>
+            <rect x="456"  y="200" width="175" height="62" rx="9"/>
+            <rect x="701"  y="132" width="175" height="66" rx="9"/>
+            <rect x="906"  y="132" width="175" height="66" rx="9"/>
+            <rect x="1111" y="132" width="175" height="66" rx="9"/>
+          </g>
+          <!-- Every box was a bare name. A viewer reading the slide without
+               the narration got nothing from "물리 검증" or "배치·이동 계산",
+               so each carries the same one-line gloss slide 4 uses. -->
+          <g fill="#e6edf3" font-size="19">
+            <text x="94"   y="164">후보 제안</text>
+            <text x="299"  y="164">정밀도 &#183; 재학습</text>
+            <text x="544"  y="94">배치&#183;이동 계산</text>
+            <text x="544"  y="230">전기&#183;시간 계산</text>
+            <text x="789"  y="164">물리 검증</text>
+            <text x="994"  y="164">판정</text>
+            <text x="1199" y="164">정밀 재검증</text>
+          </g>
+          <g fill="#93a4b8" font-size="14">
+            <text x="94"   y="186">설정 하나를 고름</text>
+            <text x="299"  y="186">설정값으로 학습</text>
+            <text x="544"  y="116">칩 내부에서 옮기는 거리</text>
+            <text x="544"  y="252">전기 소모량과 소요 시간</text>
+            <text x="789"  y="186">값이 뭉개지지 않는가</text>
+            <text x="994"  y="186">목표에 도달했나</text>
+            <text x="1199" y="186">더욱 정확한 계산</text>
+          </g>
+
+          <g stroke="#5b9dff" stroke-width="2" fill="none">
+            <path d="M181,165 H205" marker-end="url(#ar-blue)"/>
+            <path d="M386,165 H411"/>
+            <path d="M411,95 V231"/>
+            <path d="M411,95 H450" marker-end="url(#ar-blue)"/>
+            <path d="M411,231 H450" marker-end="url(#ar-blue)"/>
+            <path d="M631,95 H676"/>
+            <path d="M631,231 H676"/>
+            <path d="M676,95 V231"/>
+            <path d="M676,165 H695" marker-end="url(#ar-blue)"/>
+            <path d="M876,165 H900" marker-end="url(#ar-blue)"/>
+            <path d="M1081,165 H1105" marker-end="url(#ar-blue)"/>
+          </g>
+
+          <g stroke="#5b9dff" stroke-width="2" fill="none">
+            <path d="M1136,198 V286 Q1136,290 1132,290 L98,290 Q94,290 94,286 V202"
+                  marker-end="url(#ar-blue)"/>
+            <path d="M994,198 V290"/>
+          </g>
+          <text x="420" y="312" font-size="16" fill="#5b9dff">지금까지의 측정값을 토대로</text>
+
+          <g stroke="#5b9dff" stroke-width="2" fill="none">
+            <path d="M1199,198 V320" marker-end="url(#ar-blue)"/>
+          </g>
+          <g fill="#111821" stroke="#5b9dff">
+            <rect x="1111" y="326" width="175" height="66" rx="9"/>
+          </g>
+          <text x="1199" y="358" font-size="19" fill="#e6edf3">종료</text>
+          <text x="1199" y="380" font-size="14" fill="#93a4b8">직접 검토할 후보</text>
+
+          <g stroke="#e0b354" stroke-width="2" fill="none" stroke-dasharray="5 4"
+             marker-end="url(#ar-amber)">
+            <path d="M789,290 V320"/>
+            <path d="M701,359 H44 Q40,359 40,355 V202"/>
+          </g>
+          <g fill="#111821" stroke="#e0b354">
+            <rect x="701" y="326" width="175" height="66" rx="9"/>
+          </g>
+          <text x="789" y="358" font-size="19" fill="#e6edf3">사람에게 질문</text>
+          <text x="789" y="380" font-size="14" fill="#93a4b8">탐색 범위를 좁혀줌</text>
+          <text x="801" y="310" font-size="16" fill="#e0b354" text-anchor="start">세 번 연속 실패하면</text>
+          <text x="370" y="382" font-size="16" fill="#e0b354">사람이 정해준 범위로</text>
+        </g>
+      </svg>
+    </figure>
+
+    <div class="annots">
+      <div class="annot"><b>두 갈래가</b> 동시에 작동합니다.</div>
+      <div class="annot"><b>스스로 세 번 시도한 뒤</b> 사람을 부릅니다.</div>
+      <div class="annot"><b>끝났다고 판단해도</b> 한 번 더 확인합니다.</div>
+    </div>
+  </section>
+
+  <!-- 8 ─────────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">실제로 있었던 일</div>
+    <h1>LLM에게 숫자를 맡겼습니다.<br>틀렸습니다.</h1>
+
+    <p class="lead wide">
+      처음에는 <strong>다음 설정값을 LLM이 직접 정하도록</strong> 했습니다.
+    </p>
+
+    <div class="rewind">
+      <div class="rrow">
+        <span class="rlabel">상황</span>
+        <div class="rtext">정확도가 목표에 못 미쳤습니다.</div>
+        <div class="rform"></div>
+      </div>
+      <div class="rrow bad">
+        <span class="rlabel">LLM의 답</span>
+        <div class="rtext">&ldquo;정확도를 높이려면 <b>정밀도를 낮춰야 합니다.</b>&rdquo;</div>
+        <div class="rform">
+          <span>정밀도(화질) &#8595;</span><span class="up">정확도(인식) &#8593;</span>
+        </div>
+      </div>
+      <div class="rrow real">
+        <span class="rlabel">실제로는</span>
+        <div class="rtext">정밀도를 낮추면 정확도는 <b>더 떨어집니다.</b></div>
+        <div class="rform">
+          <span>정밀도(화질) &#8595;</span><span class="down">정확도(인식) &#8595;</span>
+        </div>
+      </div>
+    </div>
+
+    <p class="punch">사진이 흐릿하다고 <b>화질을 더 낮춘 셈</b>입니다.</p>
+
+    <p class="footnote">
+      그런데 이 답은 <b>오류로 잡히지 않았습니다.</b> 그럴듯한 설명까지 붙어 있었습니다.<br>
+      <span class="cont">탐색이 내놓은 후보보다 나쁜 답이 그대로 채택됐습니다.
+      <b>그러면 무엇을 맡겨야 할까요?</b></span>
+    </p>
+  </section>
+
+  <!-- 9 ─────────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">그래서 바꾼 것</div>
+    <h1>숫자는 맡기지 않습니다.<br><span class="dim">설명을 맡깁니다.</span></h1>
+
+    <p class="lead wide">
+      <strong>탐색</strong>은 측정한 값에서 다음 후보를 고르는 절차입니다. LLM은 건드릴 수 없습니다.
+    </p>
+
+    <div class="owner">
+      <div class="orow">
+        <div class="owhat">후보의 숫자 20개를 정하기</div>
+        <div class="oarrow">&#8594;</div>
+        <div class="owho search">탐색</div>
+      </div>
+      <div class="orow">
+        <div class="owhat">왜 이 숫자인지 설명하기</div>
+        <div class="oarrow">&#8594;</div>
+        <div class="owho llm">LLM</div>
+      </div>
+      <div class="orow">
+        <div class="owhat">값이 말이 안 되면 연구자에게 알리기</div>
+        <div class="oarrow">&#8594;</div>
+        <div class="owho llm">LLM</div>
+      </div>
+    </div>
+
+    <p class="punch">LLM은 이제 숫자를 만들지 않습니다. <b>읽고 설명할 뿐입니다.</b></p>
+
+    <p class="footnote">
+      확인하는 방법이 있습니다. <b>LLM 호출이 실패해도 후보는 똑같습니다.</b><br>
+      <span class="cont">사라지는 것은 설명뿐입니다. 권한이 정말 좁은지는 이렇게 드러납니다.</span>
+    </p>
+  </section>
+
+  <!-- 10 ────────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">시연</div>
+    <h1>실제로 이렇게 작동합니다.</h1>
+
+    <div class="cuts">
+      <div class="cut">
+        <div class="clabel"><span class="cnum">1</span>시작
+          <span class="csub">목표만 줍니다</span></div>
+<pre class="term"><span class="c">$</span> <span class="k">AUTOCIM_QAT_TRAIN_SIZE=4096</span> python -m main --model-id resnet18 \
+    --target-accuracy <span class="k">0.88</span> --search-budget-iterations <span class="k">150</span> --seed 0 \
+    --hw-config examples/hw_configs/<span class="k">calibrated_neurosim_v1_5</span>.json <span class="k">--ignore-learned-state</span> \
+    --auto-hitl --auto-hitl-max-rounds 30 --dashboard-out presentation/tessellate_report.html
+[calibration] approximate (nearest reference 128x128/7-bit ADC, distance=<span class="k">0.0</span>)
+  warm-up: <span class="k">15/15</span> candidate(s) evaluated...</pre>
+      </div>
+
+      <div class="cut">
+        <div class="clabel"><span class="cnum">2</span>한 회차
+          <span class="csub">제안·학습·배치·전기·검증</span></div>
+<pre class="term">[64] planner  : surrogate-model acquisition over 63 prior candidates (llm=<span class="k">ok</span>)
+[64] tuner    : accuracy=<span class="k">0.911</span> device=cuda epochs_run=5
+[64] mapper   : noc_latency_ms=<span class="k">0.00079</span> tiles_needed=699
+[64] profiler : energy_pj=<span class="k">501683.070863</span>
+[64] verifier : hw_converged=<span class="k">True</span> ir_drop_error_pct=0.064 noise_margin_db=41.14</pre>
+      </div>
+
+      <div class="cut">
+        <div class="clabel"><span class="cnum">3</span>결과
+          <span class="csub">150회 중 최선입니다</span></div>
+<pre class="term">=== Session finished ===
+is_converged   : <span class="k">True</span>
+iteration_count: <span class="k">150</span>
+latest candidate: accuracy=<span class="k">0.911</span> energy_pj=<span class="k">501683.070863</span> noc_latency_ms=0.00079 pareto_rank=1</pre>
+      </div>
+    </div>
+
+    <p class="footnote">
+      <b>2026년 8월 22일, 200분 실제 실행</b>입니다.<br>
+      <span class="cont">중간에 한 번 막혀 사람을 불렀고, 범위를 받아 회복했습니다.</span>
+    </p>
+  </section>
+
+  <!-- 11 ── 대시보드 (자리만 잡아둠 — 실행 리포트 나오면 채울 것) ─────────── -->
+  <section class="slide slide-scroll">
+  <div class="scroller">
+  <div class="page">
+    <div class="kicker">리포트</div>
+    <h1>리포트가 남습니다.</h1>
+
+    <p class="lead wide">실행이 종료되면 HTML 한 장이 나옵니다. 영어와 한국어로 볼 수 있습니다.</p>
+
+    <div class="report">
+      <div class="rpanel">
+        <div class="rptitle">담긴 것</div>
+        <ul class="rplist">
+          <li>실행 조건</li>
+          <li>목표 대비 실측</li>
+          <li>탐색 진행 상황</li>
+          <li>보정 근거 <span class="gl">전기 계산을 무엇에 맞췄나</span></li>
+          <li>파레토 프론트 <span class="gl">덜 쓰고 더 정확한 후보들</span></li>
+          <li>회차별 후보 <b>150건</b></li>
+        </ul>
+      </div>
+
+      <div class="rpanel wide">
+        <div class="rptitle">예를 들면, 전기 계산의 기준을 어디에 맞췄는지까지</div>
+        <p class="rplead">저희 측 계산은 실제보다 작게 나옵니다. 그래서 <b>몇 배 해야 실제와 맞는지</b>를 기록합니다.</p>
+        <div class="cal">
+          <div class="cwhen">시작할 때</div>
+          <div class="cwhat">논문에 적힌 값을 빌려 썼습니다.<span class="csrc">NeuroSim V1.5 논문 · 0.047 pJ/MAC</span></div>
+          <div class="cval">166.0044배</div>
+
+          <div class="cwhen">종료할 때</div>
+          <div class="cwhat">직접 다시 측정해서 고쳤습니다.<span class="csrc">2단계 정밀 재검증 · 150회차</span></div>
+          <div class="cval ours">59.2387배</div>
+        </div>
+        <p class="rpnote">빌려 온 기준이 <b>실측과 3배 가까이 달랐다는 사실</b>이 리포트에 그대로 적힙니다.<br>비교는 셋 다 같은 기준 위에서 했기에, 기준이 바뀌어도 <b>줄인 비율은 그대로입니다.</b></p>
+      </div>
+    </div>
+
+    <p class="footnote">
+      이 리포트는 <b>체크포인트에서 언제든 다시 만들 수 있습니다.</b><br>
+      <span class="cont">체크포인트는 <b>실행이 어디까지 갔는지 저장해 둔 파일</b>입니다 &mdash; 게임 세이브와 같습니다.</span>
+    </p>
+  </div>
+  <div class="reveal">
+    <iframe data-src="tessellate_report.html" title="Tessellate report" loading="lazy"></iframe>
+  </div>
+  </div>
+  </section>
+
+  <!-- 12 ────────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">무엇과 비교했나</div>
+    <h1>비교 상대는 둘입니다.<br><span class="dim">그러나 규칙이 달랐습니다.</span></h1>
+
+    <div class="rivals">
+      <div class="rival">
+        <div class="rtag">비교 상대</div>
+        <div class="rname">아무것도 안 함</div>
+        <div class="rspec">8비트 · 프루닝 없음</div>
+        <div class="rrule">사람이 손대지 않았을 때의 <b>기준점</b>입니다.</div>
+      </div>
+      <div class="rival">
+        <div class="rtag">비교 상대</div>
+        <div class="rname">모든 조합 계산</div>
+        <div class="rspec">눈금 위 15개 지점</div>
+        <div class="rrule">전부 평가하고 그중 <b>최고점</b>을 고릅니다.</div>
+      </div>
+      <div class="rival ours">
+        <div class="rtag">저희 측</div>
+        <div class="rname">다각도의 검토</div>
+        <div class="rspec">예전에는 <s>첫 후보에서 멈춤</s></div>
+        <div class="rrule">정해진 횟수를 다 쓰고 그중 <b>최선</b>을 고릅니다.</div>
+      </div>
+    </div>
+
+    <div class="freedom">
+      <div class="fdlab">그런데 &lsquo;모든 조합&rsquo;의 크기가 서로 다릅니다.</div>
+      <div class="fdrow">
+        <span class="fdwho">격자</span>
+        <span class="fdwhat">10개 층에 <b>전부 같은 값</b>을 넣습니다</span>
+        <span class="fdnum">36가지</span>
+      </div>
+      <div class="fdrow ours">
+        <span class="fdwho">탐색</span>
+        <span class="fdwhat">층마다 <b>다른 값</b>을 넣을 수 있습니다</span>
+        <span class="fdnum">3,656조 가지</span>
+      </div>
+    </div>
+
+    <p class="footnote">
+      처음에는 <b>탐색만 일찍 멈추고 있었으며,</b> 규칙을 맞추고 다시 측정했습니다.
+      <b>고친 것은 상대가 아니라 저희 측입니다.</b><br>
+      <span class="cont">격자가 15번에 끝나는 것은 빠르기 때문이 아니라,
+      <b>층마다 다르게 고르는 것을 포기했기 때문입니다.</b></span>
+    </p>
+  </section>
+
+  <!-- 13 ── 결과 (자리만 잡아둠 — 실행 끝나면 수치 채울 것) ───────────────── -->
+  <section class="slide">
+    <div class="kicker">결과</div>
+    <h1>요구한 대로 나왔습니다.<br><span class="dim">요구하지 않은 것은 제외했습니다.</span></h1>
+
+    <p class="lead wide">정확도만 요구했더니, <strong>정확도가 가장 높은 후보</strong>를 골라서 왔습니다.</p>
+
+    <div class="result">
+      <div class="rhead"></div>
+      <div class="rhead">정확도</div>
+      <div class="rhead">전기</div>
+
+      <div class="rlab">압축 안 함</div>
+      <div class="rval">0.907</div>
+      <div class="rbar"><span class="fill" style="width:520px"></span><b>538,265 pJ</b></div>
+
+      <div class="rlab ours">고른 답</div>
+      <div class="rval ours">0.911</div>
+      <div class="rbar ours"><span class="fill" style="width:485px"></span><b>501,683 pJ</b><span class="rdelta">&minus;6.8%</span></div>
+
+      <div class="rlab missed">미선택 후보</div>
+      <div class="rval missed">0.901</div>
+      <div class="rbar missed"><span class="fill" style="width:397px"></span><b>410,447 pJ</b><span class="rdelta">&minus;23.7%</span></div>
+    </div>
+
+    <p class="punch">정확도를 <b>0.01</b>만 내주면 전기를 <b>23.7%</b> 줄일 수 있었습니다.</p>
+
+    <p class="footnote">
+      <b>정확도 세 값은 모두 오차 안이라 사실상 같습니다.</b> 차이가 나는 곳은 전기뿐입니다.<br>
+      <span class="cont">같은 전기로 <b>100번 돌릴 것을 131번</b> 돌릴 수 있다는 뜻입니다.</span><br>
+      <span class="cont"><b>무엇을 요구하느냐가 답을 정합니다.</b> 저희 측은 정확도만 요구했습니다.</span>
+    </p>
+  </section>
+
+  <!-- 14 ────────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">정직하게 말하면</div>
+    <h1>이긴 것은 아닙니다.</h1>
+
+    <p class="lead wide">실측이 허락하는 문장만 쓰겠습니다.</p>
+
+    <div class="honest">
+      <div class="hhead">이렇게 말하고 싶었습니다</div>
+      <div class="hhead r">실제로는</div>
+
+      <div class="hclaim"><s>격자를 훑는 것보다 낫습니다</s></div>
+      <div class="htruth">전기는 <b>6.8% 낮췄지만</b> 150번을 측정했습니다. 격자는 15번입니다.</div>
+
+      <div class="hclaim"><s>탐색이 무작위보다 낫습니다</s></div>
+      <div class="htruth">가장 싼 후보는 <b>맨 처음 무작위로 찍어본 15개</b>가 찾았습니다.</div>
+
+      <div class="hclaim"><s>막히면 알아서 풀어냅니다</s></div>
+      <div class="htruth">목표가 <b>어려운 것인지 불가능한 것인지</b> 구별하지 못합니다.</div>
+
+      <div class="hclaim"><s>여러 에이전트가 협업합니다</s></div>
+      <div class="htruth">LLM을 부르는 곳은 <b>여덟 단계 중 하나</b>입니다.</div>
+    </div>
+
+    <p class="footnote">
+      그래서 이 프로젝트의 자랑은 <b>&ldquo;에이전트를 몇 개 붙였나&rdquo;가 아닙니다.</b><br>
+      <span class="cont"><b>LLM에게 얼마만큼 맡길지를 실측으로 정한 것</b>입니다.</span>
+    </p>
+  </section>
+
+  <!-- 15 ────────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">남은 것</div>
+    <h1>아직 못 하는 것들입니다.</h1>
+
+    <p class="lead wide">가까운 것부터 적었습니다.</p>
+
+    <div class="remain">
+      <div class="ritem">
+        <div class="rnum">1</div>
+        <div class="rtitle">불가능하다고 말해 주기</div>
+        <div class="rbody">지금은 세 번 실패하면 범위를 좁혀 달라고 합니다.
+          목표 자체가 불가능하면 <b>정반대&nbsp;처방</b>입니다.</div>
+      </div>
+      <div class="ritem">
+        <div class="rnum">2</div>
+        <div class="rtitle">좁힌 범위 되돌리기</div>
+        <div class="rbody">사람을 부르면 탐색 범위가 좁아집니다.
+          그런데 <b>한 번 좁히면 끝까지 잠깁니다.</b></div>
+      </div>
+      <div class="ritem">
+        <div class="rnum">3</div>
+        <div class="rtitle">하드웨어 늘리기</div>
+        <div class="rbody">이번엔 한 종류에 맞춰 돌렸습니다.
+          논문 수치에 맞춰 둔 기준이 <b>8가지</b> 더 있습니다.</div>
+      </div>
+      <div class="ritem">
+        <div class="rnum">4</div>
+        <div class="rtitle">실제 칩에서 재보기</div>
+        <div class="rbody">여기 숫자는 전부 계산과 문헌 보정입니다.
+          <b>진짜 칩에 올려 본 적은 없습니다.</b></div>
+      </div>
+    </div>
+
+    <p class="footnote">
+      어느 에이전트에나 같은 선이 있습니다. <b>LLM이 정할 것과, 검증할 수 있는 것이 정할 것.</b><br>
+      <span class="cont">저희 측은 그 선을 <b>추측이 아니라 실측으로</b> 그었습니다.</span>
+    </p>
+  </section>
+  <!-- 16 ────────────────────────────────────────────────────────────────── -->
+  <section class="slide">
+    <div class="kicker">처음 질문으로</div>
+    <h1>AI를 손목 위에서 돌리려면<br><span class="dim">무엇을 포기해야 할까요?</span></h1>
+
+    <div class="answer">
+      <div class="arow">
+        <div class="alab">포기한 것</div>
+        <div class="aval">정확도 <b>0.01</b></div>
+        <div class="anote">측정 오차 안이라 <b>사실상 아무것도</b></div>
+      </div>
+      <div class="arow gain">
+        <div class="alab">찾아낸 것</div>
+        <div class="aval">전기 <b>23.7%</b></div>
+        <div class="anote">같은 전기로 <b>100번 돌릴 것을 131번</b></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="ftitle">이 일을 업계에서는 이렇게 부릅니다</div>
+      <p class="fbody"><b>CIM(Compute-In-Memory) 가속기</b>에 신경망을 올릴 때,
+        층마다 <b>양자화</b>와 <b>프루닝</b>을 <b>다중목적 최적화</b>로 고르고
+        <b>다중 충실도 검증</b>으로 확인하는 일입니다.</p>
+      <p class="fsub">반도체 설계와 온디바이스 AI가 만나는 자리 &mdash;
+        스마트워치·무선 이어폰처럼 <b>배터리로 AI를 돌려야 하는 기기</b>가 늘수록 커지는 문제입니다.</p>
+    </div>
+
+    <p class="footnote">
+      <b>무엇을 요구하느냐가 답을 정합니다.</b> 이번에는 정확도를 요구했습니다.<br>
+      <span class="cont">그래서 답은 &ldquo;된다&rdquo;가 아니며,
+      <b>무엇을 포기하면 되는지 측정합니다.</b></span>
+    </p>
+  </section>
+
+</div>
+</div>
+</div>
+
+<button class="nav prev" id="prev" aria-label="이전 슬라이드">&lsaquo;</button>
+<button class="nav next" id="next" aria-label="다음 슬라이드">&rsaquo;</button>
+<div class="counter"><span id="cur">1</span> / <span id="tot">16</span></div>
+
+<script>
+  var slides = document.querySelectorAll('.slide');
+  var total = slides.length;
+  var current = 1;
+  document.getElementById('tot').textContent = total;
+
+  function show(n) {
+    current = Math.min(Math.max(n, 1), total);
+    slides.forEach(function (s, i) { s.classList.toggle('active', i === current - 1); });
+    document.getElementById('cur').textContent = current;
+    slides.forEach(function (s) {
+      var sc = s.querySelector('.scroller');
+      // Rewound on the way out, never on the way in: a presenter who
+      // scrolled down, stepped away and came back would otherwise land
+      // mid-report with no idea how they got there.
+      if (sc && !s.classList.contains('active')) { sc.scrollTop = 0; }
+    });
+    var frame = slides[current - 1].querySelector('iframe[data-src]');
+    // Deferred until this slide is actually reached: the report is 275KB and
+    // every other slide would pay for it on load otherwise.
+    if (frame) {
+      frame.src = frame.getAttribute('data-src');
+      frame.removeAttribute('data-src');
+    }
+    document.getElementById('progress').style.width = (current / total * 100) + '%';
+  }
+
+  document.addEventListener('keydown', function (e) {
+    // PageDown/PageUp included on purpose: every presenter remote sends those,
+    // not arrow keys. Without them the deck cannot be driven from a clicker.
+    if (['ArrowRight', 'PageDown', ' ', 'Enter'].indexOf(e.key) > -1) { e.preventDefault(); show(current + 1); }
+    if (['ArrowLeft', 'PageUp', 'Backspace'].indexOf(e.key) > -1) { e.preventDefault(); show(current - 1); }
+    if (e.key === 'Home') { e.preventDefault(); show(1); }
+    if (e.key === 'End') { e.preventDefault(); show(total); }
+  });
+
+  var dprAtLoad = window.devicePixelRatio || 1;
+  function fit() {
+    var zoom = (window.devicePixelRatio || 1) / dprAtLoad;
+    document.documentElement.style.setProperty(
+      '--fit', Math.min(innerWidth * zoom / 1456, innerHeight * zoom / 819));
+  }
+  addEventListener('resize', fit);
+  fit();
+
+  document.getElementById('prev').addEventListener('click', function () { show(current - 1); });
+  document.getElementById('next').addEventListener('click', function () { show(current + 1); });
+
+  // Swipe, for phones and tablets. Threshold is generous so a scroll or a
+  // tap never counts as a page turn.
+  var startX = null;
+  document.addEventListener('touchstart', function (e) {
+    startX = e.changedTouches[0].clientX;
+  }, { passive: true });
+  document.addEventListener('touchend', function (e) {
+    if (startX === null) return;
+    var dx = e.changedTouches[0].clientX - startX;
+    if (Math.abs(dx) > 60) show(current + (dx < 0 ? 1 : -1));
+    startX = null;
+  }, { passive: true });
+
+  // Deliberately no click-to-advance on desktop: a stray click while
+  // presenting skips a slide with no way back on a touchpad.
+  show(1);
+</script>
+</body>
+</html>
