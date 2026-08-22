@@ -58,6 +58,7 @@ venv/
 # machine) -- a shared .config/settings.json, if one is ever added, stays
 # tracked.
 .config/settings.local.json
+.config/settings.json
 
 # OS junk
 .DS_Store
