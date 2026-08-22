@@ -303,14 +303,20 @@ def test_pareto_chart_draws_warm_up_hollow_and_search_filled():
     assert len(re.findall(r'r="5" fill="#', svg)) == 2  # filled search marks
 
 
-def test_pareto_chart_labels_search_points_but_not_warm_up_samples():
-    """An LHS sample's index carries no information, so printing it is
-    noise -- front membership is already carried by colour. Labelling every
-    point put 8 label pairs within 24px of each other on a real session."""
+def test_pareto_chart_carries_iteration_ids_instead_of_printing_labels():
+    """Printed iteration numbers were dropped: at 150 candidates the ones
+    that mattered clustered in one corner, and the displacement needed to
+    keep them apart left each number sitting away from the point it named
+    (leader lines back to the marker only added more ink). Every marker now
+    carries its iteration as `data-iter` instead, and the per-iteration
+    table highlights the matching point on click -- on demand, one at a
+    time, instead of all of them all the time."""
     svg = _svg_pareto_chart(_chart_rows())
 
-    labelled = re.findall(r'fill="#c8d3e0"[^>]*>(\d+)</text>', svg)
-    assert sorted(int(n) for n in labelled) == [5, 6]
+    assert not re.findall(r'fill="#c8d3e0"[^>]*>(\d+)</text>', svg)
+    tagged = sorted(int(n) for n in re.findall(r'<circle data-iter="(\d+)"', svg))
+    assert tagged == [r["iteration"] for r in sorted(_chart_rows(), key=lambda r: r["iteration"])]
+    assert 'id="pareto-highlight"' in svg  # the ring the table moves onto a point
 
 
 def test_pareto_chart_prints_axis_end_values():
@@ -362,7 +368,9 @@ def test_pareto_chart_draws_configured_targets_as_reference_lines():
 
     assert "target accuracy 0.750" in svg
     assert "target energy 1,700,000" in svg
-    assert svg.count('stroke="#e0b354"') == 2
+    # Counts lines specifically: the click-to-highlight ring is a <circle>
+    # in the same amber, and it is not a target reference line.
+    assert len(re.findall(r'<line[^>]*stroke="#e0b354"', svg)) == 2
 
 
 def test_pareto_chart_extends_its_domain_so_a_nearby_target_stays_visible():
@@ -372,7 +380,11 @@ def test_pareto_chart_extends_its_domain_so_a_nearby_target_stays_visible():
     svg = _svg_pareto_chart(_chart_rows(), {"accuracy": 0.95})
 
     assert "target accuracy 0.950" in svg
-    assert "0.950" in re.findall(r'text-anchor="end">([0-9.]+)</text>', svg)  # axis extended to it
+    # The domain now carries 6% headroom past the extreme data point, so the
+    # target no longer lands exactly on a tick -- what matters is that the
+    # axis reaches past it, which is what makes the line drawable at all.
+    ticks = [float(t) for t in re.findall(r'text-anchor="end">([0-9.]+)</text>', svg)]
+    assert max(ticks) >= 0.95
 
 
 def test_pareto_chart_omits_a_target_that_is_nowhere_near_the_data():
@@ -504,8 +516,12 @@ def test_pareto_front_membership_is_not_carried_by_colour_alone():
 
     svg = _svg_pareto_chart(rows)
 
-    # Rings are self-closing and tooltip-less; markers are closed with </circle>.
-    rings = svg.count("<circle") - svg.count("</circle>")
+    # Rings are self-closing and tooltip-less; markers are closed with
+    # </circle>. The click-to-highlight ring is self-closing too, so it is
+    # excluded by id -- it marks whatever the reader selected, not front
+    # membership.
+    self_closing = svg.count("<circle") - svg.count("</circle>")
+    rings = self_closing - svg.count('id="pareto-highlight"')
     assert rings == 1  # exactly the one front point, not both, not neither
 
 
