@@ -64,3 +64,10 @@ venv/
 Thumbs.db
 # 시연 산출물 -- 노트북 실행 시 재생성됨
 notebooks/demo_dashboard.html
+
+# LangGraph checkpoint DBs under runs/ are the raw resume state, not a
+# record anyone reads: the 2026-08-22 capture alone is 217MB, past
+# GitHub's 100MB per-file limit, and it would bloat the repo forever.
+# The run README says where the local copy lives; the terminal log,
+# events.jsonl and the generated report are what is actually kept.
+runs/**/checkpoints.sqlite
