@@ -893,7 +893,6 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
     chart_targets = {"accuracy": state.get("target_accuracy"), "energy_pj": state.get("target_energy_pj")}
     has_targets = any(v is not None for v in chart_targets.values())
 
-    title = f"{state.get('model_id')} / {state.get('hw_spec_id')}"
     low_confidence = bool(state.get("low_confidence_conclusion"))
     # low_confidence_conclusion (hitl_node's conclude-with-best path, see
     # state.py's field docstring) also sets is_converged=True so the graph
