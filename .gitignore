@@ -54,11 +54,13 @@ venv/
 .vscode/
 .idea/
 
-# Local-only Local tool settings (permissions/tool config specific to one
-# machine) -- a shared .config/settings.json, if one is ever added, stays
-# tracked.
+# Local tool settings. Both files are permissions/tool config for whoever
+# is sitting at the machine, not a project decision, so neither is shared.
 .config/settings.local.json
 .config/settings.json
+
+# Local-only presenter notes
+presentation/qa_cards.html
 
 # OS junk
 .DS_Store
