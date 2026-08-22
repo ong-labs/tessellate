@@ -23,7 +23,7 @@ from __future__ import annotations
 import html
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from schemas.config import HWConfig
 from state import AutoCIMState
@@ -240,6 +240,20 @@ def _svg_pareto_chart(
     target_accuracy, target_energy = targets.get("accuracy"), targets.get("energy_pj")
     acc_min, acc_max = _extend_for_target(min(accuracies), max(accuracies), target_accuracy)
     e_min, e_max = _extend_for_target(min(energies), max(energies), target_energy)
+    # Breathing room on both ends. Without it the best candidate sits exactly
+    # on the top frame line and the cheapest one on the left frame, so the two
+    # points a reader actually looks for are the two hardest to see. 6% of the
+    # span each way lifts them clear without wasting the axis on empty space
+    # (a fixed 0.95 ceiling would spend 40% of this chart's height on nothing,
+    # since the data floor here is 0.691).
+    acc_pad = (acc_max - acc_min) * 0.06 or 0.01
+    e_pad = (e_max - e_min) * 0.06 or 1.0
+    # Top only on the accuracy axis: the best candidate needs to clear the
+    # frame, but the space below the worst one shows nothing -- those are
+    # candidates that missed the target badly, and padding under them just
+    # squeezes the band everything interesting lives in.
+    acc_max = acc_max + acc_pad
+    e_min, e_max = e_min - e_pad, e_max + e_pad
 
     def x(energy: float) -> float:  # energy_pj increases left -> right
         if e_max == e_min:
@@ -253,7 +267,6 @@ def _svg_pareto_chart(
 
     ordered = sorted(plottable, key=lambda r: r["iteration"])
     searched = [r for r in ordered if not _is_warmup_row(r)]
-    last_iteration = ordered[-1]["iteration"]
     front_iterations = {r["iteration"] for r in _pareto_front_2d(plottable)}
 
     # Plot frame + gridded tick values: without them the axes carried no
@@ -292,8 +305,11 @@ def _svg_pareto_chart(
         axis.append(
             f'<line x1="{pad}" y1="{ty:.1f}" x2="{width - pad}" y2="{ty:.1f}" stroke="#e0b354" '
             f'stroke-width="1.5" stroke-dasharray="6 4"/>'
-            f'<text x="{width - pad - 4}" y="{ty - 6:.1f}" font-size="10" fill="#e0b354" '
-            f'text-anchor="end">target accuracy {target_accuracy:.3f}</text>'
+            # Anchored left, not right: candidates cluster toward high
+            # accuracy AND high energy, so the plot's top-right corner is
+            # exactly where this label used to land on top of them.
+            f'<text x="{pad + 4}" y="{ty - 6:.1f}" font-size="10" fill="#e0b354" '
+            f'text-anchor="start">target accuracy {target_accuracy:.3f}</text>'
         )
     if target_energy is not None and e_min <= target_energy <= e_max:
         tx = x(target_energy)
@@ -318,23 +334,22 @@ def _svg_pareto_chart(
             steps.append(f"{px:.1f},{py:.1f}")  # riser: the accuracy that energy buys
             previous_y = py
         front_line = (
-            f'<polyline points="{" ".join(steps)}" fill="none" stroke="#5b9dff" stroke-width="2" opacity="0.85"/>'
+            f'<polyline points="{" ".join(steps)}" fill="none" stroke="#5b9dff" stroke-width="2" opacity="0.85" pointer-events="none"/>'
         )
 
     trajectory = ""
     if len(searched) > 1:
         path = " ".join(f"{x(r['energy_pj']):.1f},{y(r['accuracy']):.1f}" for r in searched)
         trajectory = (
-            f'<polyline points="{path}" fill="none" stroke="#4a6b8a" stroke-width="1.5" stroke-dasharray="4 3"/>'
+            f'<polyline points="{path}" fill="none" stroke="#4a6b8a" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none"/>'
         )
 
-    marks = []
+    # Two draw layers: dominated points go down first so the handful of
+    # front points are never buried under the 130-odd candidates that
+    # cluster in one corner.
+    bg_marks: List[str] = []
+    marks: List[str] = []
     # Two candidates can land on the same point -- iterations 16 and 17 of a
-    # real session shared an energy figure exactly and differed by 0.004
-    # accuracy, putting their two labels 3.4px apart and rendering both
-    # unreadable. Each label is pushed straight down until it clears every
-    # label already placed.
-    placed_labels: List[Tuple[float, float]] = []
     for r in ordered:
         cx, cy = x(r["energy_pj"]), y(r["accuracy"])
         on_front = r["iteration"] in front_iterations
@@ -355,33 +370,26 @@ def _svg_pareto_chart(
             # carries it. Drawn before the marker so it sits behind.
             marks.append(
                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{6.5 if warmup else 8.5:.1f}" fill="none" '
-                f'stroke="{color}" stroke-width="1.2" opacity="0.55"/>'
+                f'stroke="{color}" stroke-width="1.2" opacity="0.55" pointer-events="none"/>'
             )
         if warmup:
             shape = (
-                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="3.5" fill="none" '
+                f'<circle data-iter="{r["iteration"]}" cx="{cx:.1f}" cy="{cy:.1f}" r="3.5" '
+                f'fill="none" pointer-events="all" '
                 f'stroke="{color}" stroke-width="1.5" opacity="{1.0 if on_front else 0.7}">'
             )
         else:
-            shape = f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{color}" opacity="0.95">'
-        marks.append(f"{shape}<title>{html.escape(tooltip)}</title></circle>")
-        if not warmup or r["iteration"] == last_iteration:
-            # Clear the marker's real outer edge, which the front ring above
-            # widens to 8.5px -- a fixed +10 left the digits sitting on the
-            # ring stroke rather than beside it.
-            lx, ly = cx + (12.0 if on_front else 10.0), cy + 4
-            while any(abs(lx - px) < 20 and abs(ly - py) < 11 for px, py in placed_labels):
-                ly += 11
-            placed_labels.append((lx, ly))
-            # paint-order=stroke draws a panel-coloured halo *behind* the
-            # glyphs: displaced labels land on the trajectory/staircase they
-            # were displaced away from, and a line running through a two-digit
-            # number at 10px makes it unreadable.
-            marks.append(
-                f'<text x="{lx:.1f}" y="{ly:.1f}" font-size="10" fill="#c8d3e0" '
-                f'stroke="#111821" stroke-width="3" paint-order="stroke">{r["iteration"]}</text>'
+            # Dominated points are the overwhelming majority at 150
+            # candidates, and at r=5/opacity .95 they buried the handful of
+            # front points this chart exists to show. Smaller and fainter.
+            shape = (
+                f'<circle data-iter="{r["iteration"]}" cx="{cx:.1f}" cy="{cy:.1f}" '
+                f'r="{5 if on_front else 3}" '
+                f'fill="{color}" opacity="{0.95 if on_front else 0.45}">'
             )
-
+        (marks if on_front else bg_marks).append(
+            f"{shape}<title>{html.escape(tooltip)}</title></circle>"
+        )
     return (
         f'<svg viewBox="0 0 {width} {height}" width="100%" height="auto" '
         # Capped well above the viewBox width and centred: pinned to `width`
@@ -393,9 +401,12 @@ def _svg_pareto_chart(
         f'blue marks and the staircase are the energy-accuracy Pareto front, '
         f'dashed amber lines are this run\'s configured targets">'
         + "".join(axis)
+        + "".join(bg_marks)
         + trajectory
         + front_line
         + "".join(marks)
+        + '<circle id="pareto-highlight" cx="-99" cy="-99" r="9" fill="none" '
+          'stroke="#e0b354" stroke-width="2.5" opacity="0" pointer-events="none"/>'
         + f'<text x="{width / 2:.1f}" y="{height - 8}" font-size="11" fill="#93a4b8" '
         f'text-anchor="middle">energy_pj &#8594; (lower=better)</text>'
         + f'<text x="14" y="{height / 2:.1f}" font-size="11" fill="#93a4b8" text-anchor="middle" '
@@ -428,11 +439,9 @@ def _pareto_legend_html(has_targets: bool) -> str:
         '<span class="legend-item"><span class="legend-swatch legend-ring" '
         'style="background:#5b9dff"></span>'
         f'{_bi("Ringed: on the energy-accuracy Pareto front", "테두리 있는 점: 에너지-정확도 파레토 프론트 위의 후보")}</span>'
-        '<span class="legend-item"><span class="legend-swatch" style="background:#5c6b7e"></span>'
-        f'{_bi("Dominated on these two axes", "이 두 축 기준으로 피지배인 후보")}</span>'
         '<span class="legend-item"><span class="legend-swatch" '
         'style="background:transparent;border:1.5px solid #5c6b7e"></span>'
-        f'{_bi("Hollow: LHS warm-up (unordered samples)", "빈 원: LHS 워밍업 (표본 간 순서 없음)")}</span>'
+        f'{_bi("Hollow: found by random LHS warm-up, not by the search", "빈 원: 탐색이 아니라 무작위 LHS 워밍업이 찾은 후보")}</span>'
         '<span class="legend-item"><span class="legend-swatch" '
         'style="background:#5b9dff;border-radius:0;height:2px"></span>'
         f'{_bi("Staircase: the front itself", "계단선: 파레토 프론트")}</span>'
@@ -440,6 +449,10 @@ def _pareto_legend_html(has_targets: bool) -> str:
         'style="background:transparent;border-top:2px dashed #4a6b8a;border-radius:0;height:0"></span>'
         f'{_bi("Dashed: surrogate-guided search order", "점선: 서로게이트 기반 탐색 순서")}</span>'
         f"{target_item}"
+        # Last on purpose: this is every point that is *not* on the front,
+        # so it is both the most numerous and the least informative entry.
+        '<span class="legend-item"><span class="legend-swatch" style="background:#5c6b7e"></span>'
+        f'{_bi("Small and faded: dominated on these two axes", "작고 흐린 점: 이 두 축 기준으로 피지배인 후보")}</span>'
         "</div>"
         f'<p class="summary">{_bi("The front drawn here is over the two plotted axes only. The pareto_rank column "
                                  "in the table below is computed over three objectives (accuracy, energy, latency), "
@@ -469,7 +482,7 @@ def _format_significant(value: Any, digits: int = 3) -> str:
     return f"{value:,.{decimals}f}"
 
 
-def _row_html(r: Dict[str, Any]) -> str:
+def _row_html(r: Dict[str, Any], front_iterations: Optional[Set[int]] = None) -> str:
     """Rationale is rendered in full (no char-count truncation) -- a
     hard `[:80]` slice cut mid-word/mid-sentence, which read as broken
     rather than intentionally short. `.rationale-cell`'s CSS wraps it
@@ -485,8 +498,10 @@ def _row_html(r: Dict[str, Any]) -> str:
     rationale = html.escape(str(r.get("rationale") or ""))
     rationale_ko = r.get("rationale_ko")
     rationale_html = _bi(rationale, html.escape(rationale_ko) if rationale_ko else rationale)
+    on_front = bool(front_iterations and r.get("iteration") in front_iterations)
     return (
-        "<tr>"
+        f'<tr data-iter="{r["iteration"]}" data-conv="{1 if r.get("is_converged") else 0}" '
+        f'data-front="{1 if on_front else 0}" onclick="selectIteration({r["iteration"]})">'
         f"<td>{r['iteration']}</td>"
         f"<td>{html.escape(str(r.get('search_tag') or '-'))}</td>"
         f"<td>{_format_or_dash(r.get('accuracy'))}</td>"
@@ -499,7 +514,7 @@ def _row_html(r: Dict[str, Any]) -> str:
     )
 
 
-def _warmup_group_html(group: List[Dict[str, Any]]) -> str:
+def _warmup_group_html(group: List[Dict[str, Any]], front_iterations: Optional[Set[int]] = None) -> str:
     """Collapses a contiguous run of LHS warm-up rows into one
     <details>-backed summary row (native disclosure, no JS) instead of
     `warmup_count(n_stages)` individual ones -- at the real max
@@ -513,7 +528,7 @@ def _warmup_group_html(group: List[Dict[str, Any]]) -> str:
     first, last = group[0]["iteration"], group[-1]["iteration"]
     summary_en = f"Warm-up batch (iterations {first}-{last}, {len(group)} candidates, no LLM confirmation)"
     summary_ko = f"워밍업 배치 (반복 {first}-{last}, {len(group)}개 후보, LLM 개입 없음)"
-    inner_rows = "\n".join(_row_html(r) for r in group)
+    inner_rows = "\n".join(_row_html(r, front_iterations) for r in group)
     return (
         '<tr class="warmup-group-row">'
         '<td colspan="8" class="warmup-group-cell">'
@@ -530,6 +545,13 @@ def _warmup_group_html(group: List[Dict[str, Any]]) -> str:
 
 def _table_rows_html(rows: List[Dict[str, Any]]) -> str:
     ordered = sorted(rows, key=lambda r: r["iteration"])
+    # Same 2-axis front the chart draws, so the table's "Pareto only" filter
+    # and the chart's ringed points always agree.
+    plottable = [
+        r for r in ordered
+        if isinstance(r.get("energy_pj"), (int, float)) and isinstance(r.get("accuracy"), (int, float))
+    ]
+    front_iterations = {r["iteration"] for r in _pareto_front_2d(plottable)}
     blocks: List[str] = []
     i = 0
     while i < len(ordered):
@@ -540,10 +562,14 @@ def _table_rows_html(rows: List[Dict[str, Any]]) -> str:
             group = ordered[i:j]
             # A lone warm-up row isn't worth collapsing behind a click --
             # only a real multi-row batch is.
-            blocks.append(_warmup_group_html(group) if len(group) >= 2 else _row_html(group[0]))
+            blocks.append(
+                _warmup_group_html(group, front_iterations)
+                if len(group) >= 2
+                else _row_html(group[0], front_iterations)
+            )
             i = j
         else:
-            blocks.append(_row_html(ordered[i]))
+            blocks.append(_row_html(ordered[i], front_iterations))
             i += 1
     return "\n".join(blocks)
 
@@ -741,6 +767,15 @@ def _targets_section_html(state: AutoCIMState) -> str:
         values = [c[field] for c in history if isinstance(c.get(field), (int, float))]
         return better(values) if values else None
 
+    def best_iter(field: str, better) -> Optional[int]:
+        """Which candidate produced that best. Without it the three
+        best-this-run cells read as one design point, which the note below
+        denies in words but nothing on screen showed."""
+        scored = [c for c in history if isinstance(c.get(field), (int, float))]
+        if not scored:
+            return None
+        return better(scored, key=lambda c: c[field]).get("iteration")
+
     # Each dimension carries its own formatter rather than a shared format
     # string: latency needs `_format_significant` (its real values are
     # ~0.0004 ms, which any fixed-decimal format prints as a flat "0.000").
@@ -750,6 +785,7 @@ def _targets_section_html(state: AutoCIMState) -> str:
             "정확도",
             state.get("target_accuracy"),
             best("accuracy", max),
+            best_iter("accuracy", max),
             "{:.4f}".format,
             lambda b, t: b >= t,
         ),
@@ -758,6 +794,7 @@ def _targets_section_html(state: AutoCIMState) -> str:
             "에너지 (pJ)",
             state.get("target_energy_pj"),
             best("energy_pj", min),
+            best_iter("energy_pj", min),
             "{:,.2f}".format,
             lambda b, t: b <= t,
         ),
@@ -766,13 +803,14 @@ def _targets_section_html(state: AutoCIMState) -> str:
             "지연 시간 (ms)",
             state.get("target_latency_ms"),
             best("noc_latency_ms", min),
+            best_iter("noc_latency_ms", min),
             _format_significant,
             lambda b, t: b <= t,
         ),
     ]
 
     rows = []
-    for label_en, label_ko, target, achieved, fmt, meets in dimensions:
+    for label_en, label_ko, target, achieved, achieved_iter, fmt, meets in dimensions:
         if target is None:
             target_cell = f'<span class="spec-unset">{_bi("not set (not gated)", "설정 안 함 (수렴 판정 미적용)")}</span>'
             verdict = '<span class="spec-unset">&mdash;</span>'
@@ -785,9 +823,18 @@ def _targets_section_html(state: AutoCIMState) -> str:
             else:
                 verdict = f'<span class="verdict-miss">&#10007; {_bi("not met", "미달성")}</span>'
         achieved_cell = fmt(achieved) if achieved is not None else "-"
+        if achieved_iter is None:
+            iter_cell = '<span class="spec-unset">&mdash;</span>'
+        else:
+            # Clickable: reuses the per-iteration table's highlight, so a
+            # reader can see where this best actually sits on the front.
+            iter_cell = (
+                f'<button type="button" class="iter-link" '
+                f'onclick="selectIteration({achieved_iter})">{achieved_iter}</button>'
+            )
         rows.append(
             f"<tr><td>{_bi(label_en, label_ko)}</td><td>{target_cell}</td>"
-            f"<td>{achieved_cell}</td><td>{verdict}</td></tr>"
+            f"<td>{achieved_cell}</td><td>{iter_cell}</td><td>{verdict}</td></tr>"
         )
 
     converged = next((c for c in reversed(history) if c.get("is_converged")), None)
@@ -811,7 +858,8 @@ def _targets_section_html(state: AutoCIMState) -> str:
     return (
         '<div class="table-scroll"><table class="targets-table"><thead><tr>'
         f'<th>{_bi("objective", "목적 지표")}</th><th>{_bi("target", "목표값")}</th>'
-        f'<th>{_bi("best this run", "이번 실행 최고값")}</th><th>{_bi("verdict", "달성 여부")}</th>'
+        f'<th>{_bi("best this run", "이번 실행 최고값")}</th>'
+        f'<th>{_bi("at iter", "해당 회차")}</th><th>{_bi("verdict", "달성 여부")}</th>'
         f"</tr></thead><tbody>{''.join(rows)}</tbody></table></div>"
         f'<p class="summary">{converged_line}</p>'
         f'<p class="summary">{_bi("Each best-this-run figure is the best value over all candidates for that "
@@ -865,7 +913,8 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
 <html>
 <head>
 <meta charset="utf-8">
-<title>Tessellate report: {html.escape(title)}</title>
+<title>Tessellate_REPORT</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230a0e13%22/%3E%3Cpath d=%22M7 6 V25 H27%22 stroke=%22%233d4e63%22 stroke-width=%222.6%22 fill=%22none%22 stroke-linecap=%22round%22/%3E%3Ccircle cx=%2212%22 cy=%2221%22 r=%222.5%22 fill=%22%235b9dff%22/%3E%3Ccircle cx=%2217%22 cy=%2216%22 r=%222.5%22 fill=%22%235b9dff%22/%3E%3Ccircle cx=%2223%22 cy=%2210%22 r=%222.5%22 fill=%22%23e0b354%22/%3E%3C/svg%3E">
 <style>
   :root {{
     color-scheme: dark;
@@ -911,6 +960,21 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
   }}
   .lang-btn:hover {{ color: var(--text); }}
   .lang-btn.active {{ color: var(--blue); border-color: var(--blue); }}
+  .iter-link {{
+    background: none; border: none; padding: 0; cursor: pointer;
+    color: #5b9dff; font: inherit; text-decoration: underline dotted;
+  }}
+  .iter-link:hover {{ color: #e0b354; }}
+  tr[data-iter] {{ cursor: pointer; }}
+  tr[data-iter].selected > td {{ background: #24313f; }}
+  tr[data-iter].selected > td:first-child {{ box-shadow: inset 3px 0 0 #e0b354; }}
+  .row-filter {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }}
+  .filter-btn {{
+    background: var(--bg-panel); color: var(--text-muted); cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px; font-size: 12.5px;
+  }}
+  .filter-btn.active {{ background: #5b9dff; border-color: #5b9dff; color: #06101f; font-weight: 600; }}
+  .filter-count {{ font-size: 12.5px; color: var(--text-muted); margin-left: 4px; }}
   .legend {{ display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; }}
   .legend-item {{ display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }}
   .legend-swatch {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; }}
@@ -1085,6 +1149,15 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
 </div>
 
 <h2>{_bi("Per-iteration candidates", "반복별 후보 목록")}</h2>
+<div class="row-filter">
+  <button type="button" class="filter-btn active" data-filter="all"
+    onclick="setRowFilter('all')">{_bi("All", "전체")}</button>
+  <button type="button" class="filter-btn" data-filter="conv"
+    onclick="setRowFilter('conv')">{_bi("Converged only", "수렴한 것만")}</button>
+  <button type="button" class="filter-btn" data-filter="front"
+    onclick="setRowFilter('front')">{_bi("Pareto front only", "파레토 프론트만")}</button>
+  <span class="filter-count" id="filter-count"></span>
+</div>
 <div class="table-scroll table-scroll-tall">
 <table class="iteration-table">
 <thead><tr>
@@ -1103,6 +1176,48 @@ def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = N
 </table>
 </div>
 <script>
+function selectIteration(n) {{
+  var ring = document.getElementById('pareto-highlight');
+  var dot = document.querySelector('circle[data-iter="' + n + '"]');
+  var row = document.querySelector('tr[data-iter="' + n + '"]');
+  var already = row && row.classList.contains('selected');
+  document.querySelectorAll('tr[data-iter].selected').forEach(function (t) {{
+    t.classList.remove('selected');
+  }});
+  if (already || !dot || !ring) {{
+    if (ring) {{ ring.setAttribute('opacity', '0'); }}
+    return;
+  }}
+  if (row) {{ row.classList.add('selected'); }}
+  ring.setAttribute('cx', dot.getAttribute('cx'));
+  ring.setAttribute('cy', dot.getAttribute('cy'));
+  ring.setAttribute('opacity', '1');
+  dot.closest('svg').scrollIntoView({{ block: 'center', behavior: 'smooth' }});
+}}
+
+function setRowFilter(mode) {{
+  var shown = 0, total = 0;
+  document.querySelectorAll('tr[data-conv]').forEach(function (tr) {{
+    total++;
+    var ok = mode === 'all'
+      || (mode === 'conv' && tr.dataset.conv === '1')
+      || (mode === 'front' && tr.dataset.front === '1');
+    tr.hidden = !ok;
+    if (ok) shown++;
+  }});
+  document.querySelectorAll('tr.warmup-group-row').forEach(function (tr) {{
+    var inner = tr.querySelectorAll('tr[data-conv]');
+    var any = Array.prototype.some.call(inner, function (x) {{ return !x.hidden; }});
+    tr.hidden = !any;
+  }});
+  document.querySelectorAll('.filter-btn').forEach(function (b) {{
+    b.classList.toggle('active', b.dataset.filter === mode);
+  }});
+  var c = document.getElementById('filter-count');
+  if (c) {{ c.textContent = shown + ' / ' + total; }}
+}}
+document.addEventListener('DOMContentLoaded', function () {{ setRowFilter('all'); }});
+
 function setDashboardLang(lang) {{
   document.querySelectorAll('[data-lang]').forEach(function (el) {{
     el.hidden = el.getAttribute('data-lang') !== lang;
