@@ -1,4 +1,4 @@
-"""Compares AutoCIM-Agent's searched result against a fixed, unoptimized
+"""Compares Tessellate's searched result against a fixed, unoptimized
 "naive" baseline configuration -- the search-free reference point a
 hand-tuned human design would plausibly pick without spending any
 optimization effort (uniform weight_bits/activation_bits, zero column
@@ -354,7 +354,7 @@ def print_comparison_report(comparison: Dict[str, Dict[str, Any]]) -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare AutoCIM-Agent's searched result against a fixed, unsearched baseline "
+        description="Compare Tessellate's searched result against a fixed, unsearched baseline "
         "config, both evaluated across the same N seeds."
     )
     parser.add_argument("--model-id", default="resnet18")
