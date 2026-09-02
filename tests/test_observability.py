@@ -3,7 +3,7 @@ channel from state["messages"]' free text (nodes/planner.py) that a
 researcher can grep/filter/machine-parse across a run.
 
 `isolated_observability_log_dir` (tests/conftest.py, autouse) points
-AUTOCIM_LOG_DIR at a per-test tmp_path, so these tests read real on-disk
+TESSELLATE_LOG_DIR at a per-test tmp_path, so these tests read real on-disk
 log files without touching the real repo's .cache/logs/.
 """
 
@@ -33,7 +33,7 @@ def test_log_event_writes_one_json_line_per_call_to_the_runs_log_file(tmp_path, 
     import observability
 
     log_dir = tmp_path / "custom_logs"
-    monkeypatch.setenv("AUTOCIM_LOG_DIR", str(log_dir))
+    monkeypatch.setenv("TESSELLATE_LOG_DIR", str(log_dir))
     observability.reset_loggers()
 
     log_event("my_run", node="planner", event="candidate_proposed", iteration=1, foo="bar")
@@ -53,7 +53,7 @@ def test_run_ids_with_reserved_filename_characters_are_sanitized_on_disk(tmp_pat
     import observability
 
     log_dir = tmp_path / "logs"
-    monkeypatch.setenv("AUTOCIM_LOG_DIR", str(log_dir))
+    monkeypatch.setenv("TESSELLATE_LOG_DIR", str(log_dir))
     observability.reset_loggers()
 
     log_event("resnet18::test_hw_good", node="planner", event="candidate_proposed", iteration=1)
@@ -68,13 +68,13 @@ def test_reset_loggers_lets_a_new_log_dir_take_effect(tmp_path, monkeypatch):
     import observability
 
     first_dir = tmp_path / "first"
-    monkeypatch.setenv("AUTOCIM_LOG_DIR", str(first_dir))
+    monkeypatch.setenv("TESSELLATE_LOG_DIR", str(first_dir))
     observability.reset_loggers()
     log_event("same_run_id", node="planner", event="candidate_proposed", iteration=1)
     assert (first_dir / "same_run_id.jsonl").exists()
 
     second_dir = tmp_path / "second"
-    monkeypatch.setenv("AUTOCIM_LOG_DIR", str(second_dir))
+    monkeypatch.setenv("TESSELLATE_LOG_DIR", str(second_dir))
     observability.reset_loggers()
     log_event("same_run_id", node="planner", event="candidate_proposed", iteration=2)
     assert (second_dir / "same_run_id.jsonl").exists()
