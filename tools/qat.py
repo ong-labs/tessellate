@@ -5,9 +5,8 @@ this project's idea: it follows Kim et al., "Column-wise Quantization of
 Weights and Partial Sums for Accurate and Efficient Compute-In-Memory
 Accelerators" (DATE 2025, arXiv:2502.07842). What this file implements is a
 simplification of it -- notably WITHOUT that paper's learnable (LSQ) scale
-factors and without its array-level tiling of partial sums. See
-docs/prior_work.md for exactly what is and is not carried over; do not
-describe this file as an implementation of that paper.
+factors and without its array-level tiling of partial sums. Do not describe
+this file as an implementation of that paper.
 
 Replaces the earlier accuracy-by-formula mock with genuine PyTorch
 mechanics: real crossbar-aligned fake-quantization (straight-through
