@@ -1,6 +1,6 @@
 """Docker-bridge entrypoint for `tools.precision_check.simulate_precise_energy`.
 
-`tools/precision_check.py`'s `_call_docker_precision_bridge` (`AUTOCIM_PRECISION_BACKEND=docker`)
+`tools/precision_check.py`'s `_call_docker_precision_bridge` (`TESSELLATE_PRECISION_BACKEND=docker`)
 invokes this via `docker run ... python -m tools.precision_check_cli` so a
 local (Windows, no C++ toolchain) run can still get real
 `hwcomponents_neurosim`/`hwcomponents_cacti` numbers for the rare converged
