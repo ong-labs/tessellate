@@ -349,11 +349,11 @@ def test_compute_updated_calibration_factor_guards_against_zero_or_negative_raw_
 
 
 def test_docker_bridge_not_attempted_by_default(monkeypatch):
-    # AUTOCIM_PRECISION_BACKEND unset -> "local" default (same local-first/
-    # opt-in-cloud pattern as AUTOCIM_PLANNER_MODEL): subprocess.run must
+    # TESSELLATE_PRECISION_BACKEND unset -> "local" default (same local-first/
+    # opt-in-cloud pattern as TESSELLATE_PLANNER_MODEL): subprocess.run must
     # never be called, regardless of whether hwcomponents_neurosim/_cacti
     # are importable in this process.
-    monkeypatch.delenv("AUTOCIM_PRECISION_BACKEND", raising=False)
+    monkeypatch.delenv("TESSELLATE_PRECISION_BACKEND", raising=False)
     monkeypatch.setattr(precision_check, "_NEUROSIM_AVAILABLE", False)
     monkeypatch.setattr(precision_check, "_CACTI_AVAILABLE", False)
     run_spy = MagicMock()
@@ -368,7 +368,7 @@ def test_docker_bridge_skipped_when_local_real_packages_already_available(monkey
     # Already running where hwcomponents_neurosim/_cacti are both real (the
     # Docker image itself) -- must not shell out to `docker run` from
     # inside a container (no docker-in-docker).
-    monkeypatch.setenv("AUTOCIM_PRECISION_BACKEND", "docker")
+    monkeypatch.setenv("TESSELLATE_PRECISION_BACKEND", "docker")
     monkeypatch.setattr(precision_check, "_NEUROSIM_AVAILABLE", True)
     monkeypatch.setattr(precision_check, "_CACTI_AVAILABLE", True)
     run_spy = MagicMock()
@@ -383,7 +383,7 @@ def test_docker_bridge_skipped_when_local_real_packages_already_available(monkey
 
 
 def test_docker_bridge_result_used_verbatim_when_it_succeeds(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_PRECISION_BACKEND", "docker")
+    monkeypatch.setenv("TESSELLATE_PRECISION_BACKEND", "docker")
     monkeypatch.setattr(precision_check, "_NEUROSIM_AVAILABLE", False)
     monkeypatch.setattr(precision_check, "_CACTI_AVAILABLE", False)
     bridged_result = {
@@ -402,7 +402,7 @@ def test_docker_bridge_result_used_verbatim_when_it_succeeds(monkeypatch):
 
 
 def test_docker_bridge_falls_back_to_local_when_docker_missing(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_PRECISION_BACKEND", "docker")
+    monkeypatch.setenv("TESSELLATE_PRECISION_BACKEND", "docker")
     monkeypatch.setattr(precision_check, "_NEUROSIM_AVAILABLE", False)
     monkeypatch.setattr(precision_check, "_CACTI_AVAILABLE", False)
     _force_no_real_buffer(monkeypatch)
@@ -416,7 +416,7 @@ def test_docker_bridge_falls_back_to_local_when_docker_missing(monkeypatch):
 
 
 def test_docker_bridge_falls_back_when_daemon_not_running(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_PRECISION_BACKEND", "docker")
+    monkeypatch.setenv("TESSELLATE_PRECISION_BACKEND", "docker")
     monkeypatch.setattr(precision_check, "_NEUROSIM_AVAILABLE", False)
     monkeypatch.setattr(precision_check, "_CACTI_AVAILABLE", False)
     _force_no_real_buffer(monkeypatch)
@@ -431,7 +431,7 @@ def test_docker_bridge_falls_back_when_daemon_not_running(monkeypatch):
 
 
 def test_docker_bridge_falls_back_on_timeout(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_PRECISION_BACKEND", "docker")
+    monkeypatch.setenv("TESSELLATE_PRECISION_BACKEND", "docker")
     monkeypatch.setattr(precision_check, "_NEUROSIM_AVAILABLE", False)
     monkeypatch.setattr(precision_check, "_CACTI_AVAILABLE", False)
     monkeypatch.setattr(
@@ -456,7 +456,7 @@ def test_docker_bridge_uses_configured_image_name(monkeypatch):
     # which addresses the container by name instead -- actually appears in
     # the command this test inspects.
     monkeypatch.setattr(precision_check, "_ensure_docker_container_running", lambda image, container: False)
-    monkeypatch.setenv("AUTOCIM_PRECISION_DOCKER_IMAGE", "my-custom-image:tag")
+    monkeypatch.setenv("TESSELLATE_PRECISION_DOCKER_IMAGE", "my-custom-image:tag")
     ok_proc = MagicMock(returncode=0, stdout='{"raw_energy_pj": 1.0}')
     run_spy = MagicMock(return_value=ok_proc)
     monkeypatch.setattr(subprocess, "run", run_spy)
@@ -467,9 +467,9 @@ def test_docker_bridge_uses_configured_image_name(monkeypatch):
     assert "my-custom-image:tag" in called_args
 
 
-def test_docker_bridge_defaults_to_autocim_agent_image(monkeypatch):
+def test_docker_bridge_defaults_to_tessellate_image(monkeypatch):
     monkeypatch.setattr(precision_check, "_ensure_docker_container_running", lambda image, container: False)
-    monkeypatch.delenv("AUTOCIM_PRECISION_DOCKER_IMAGE", raising=False)
+    monkeypatch.delenv("TESSELLATE_PRECISION_DOCKER_IMAGE", raising=False)
     ok_proc = MagicMock(returncode=0, stdout='{"raw_energy_pj": 1.0}')
     run_spy = MagicMock(return_value=ok_proc)
     monkeypatch.setattr(subprocess, "run", run_spy)
@@ -477,12 +477,12 @@ def test_docker_bridge_defaults_to_autocim_agent_image(monkeypatch):
     _call_docker_precision_bridge(_hw(), _LAYER_CONFIGS)
 
     called_args = run_spy.call_args[0][0]
-    assert "autocim-agent" in called_args
+    assert "tessellate" in called_args
 
 
 def test_docker_bridge_uses_docker_exec_when_container_already_warm(monkeypatch):
     monkeypatch.setattr(precision_check, "_ensure_docker_container_running", lambda image, container: True)
-    monkeypatch.setenv("AUTOCIM_PRECISION_DOCKER_CONTAINER", "my-warm-container")
+    monkeypatch.setenv("TESSELLATE_PRECISION_DOCKER_CONTAINER", "my-warm-container")
     ok_proc = MagicMock(returncode=0, stdout='{"raw_energy_pj": 1.0}')
     run_spy = MagicMock(return_value=ok_proc)
     monkeypatch.setattr(subprocess, "run", run_spy)
@@ -500,7 +500,7 @@ def test_ensure_docker_container_running_reuses_an_already_running_container(mon
     run_spy = MagicMock(return_value=running_inspect)
     monkeypatch.setattr(subprocess, "run", run_spy)
 
-    assert precision_check._ensure_docker_container_running("autocim-agent", "my-container") is True
+    assert precision_check._ensure_docker_container_running("tessellate", "my-container") is True
     # Only the inspect call -- never rm/run, since it was already running.
     run_spy.assert_called_once()
     assert run_spy.call_args[0][0][:2] == ["docker", "inspect"]
@@ -517,7 +517,7 @@ def test_ensure_docker_container_running_recreates_a_stopped_container(monkeypat
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
 
-    assert precision_check._ensure_docker_container_running("autocim-agent", "my-container") is True
+    assert precision_check._ensure_docker_container_running("tessellate", "my-container") is True
     assert calls[0][:2] == ["docker", "inspect"]
     assert calls[1][:3] == ["docker", "rm", "-f"]
     assert calls[2][:3] == ["docker", "run", "-d"]
@@ -525,7 +525,7 @@ def test_ensure_docker_container_running_recreates_a_stopped_container(monkeypat
 
 def test_ensure_docker_container_running_returns_false_when_docker_missing(monkeypatch):
     monkeypatch.setattr(subprocess, "run", MagicMock(side_effect=FileNotFoundError("docker not found")))
-    assert precision_check._ensure_docker_container_running("autocim-agent", "my-container") is False
+    assert precision_check._ensure_docker_container_running("tessellate", "my-container") is False
 
 
 # --- Stage-1 / Stage-2 pass-count consistency -------------------------------
