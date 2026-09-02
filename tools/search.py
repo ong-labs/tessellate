@@ -115,7 +115,7 @@ def warmup_candidate(
     index: int, n_warmup: int, bit_bounds: Bounds, pruning_bounds: Bounds, seed: int
 ) -> Tuple[float, float]:
     """The `index`-th warm-up candidate. Deterministic in `(index, seed)`, so
-    it never needs its own cursor in `AutoCIMState` -- calling this again
+    it never needs its own cursor in `TessellateState` -- calling this again
     with the same `index` (e.g. a HITL-resumed retry of the same iteration)
     reproduces the same point rather than silently sampling a new one."""
     candidates = latin_hypercube_candidates(n_warmup, bit_bounds, pruning_bounds, seed)
