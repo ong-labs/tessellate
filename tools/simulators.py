@@ -1,4 +1,4 @@
-"""Backend simulator tools for AutoCIM-Agent.
+"""Backend simulator tools for Tessellate.
 
 Each function is the Python/PyTorch (or eventual NeuroSim/CIM-Loop
 C-extension) wrapper referenced in Research_Plan.md 3: the LLM only picks
@@ -88,7 +88,7 @@ def tuner_tool(args: TunerToolInput) -> TunerToolOutput:
             "avg_column_pruning_ratio": avg_pruning_ratio,
             "layer_configs": [lc.model_dump(mode="json") for lc in args.layer_configs],
             # tools/qat.py's run_qat_tuning auto-detects CUDA/MPS/CPU
-            # (AUTOCIM_QAT_DEVICE overrides) -- echoed back so it's visible
+            # (TESSELLATE_QAT_DEVICE overrides) -- echoed back so it's visible
             # in the observability log / dashboard, not just inferred.
             "device": tuning_result["device"],
         },
