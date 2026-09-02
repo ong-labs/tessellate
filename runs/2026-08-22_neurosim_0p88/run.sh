@@ -5,7 +5,7 @@
 #                            (166.93x vs 51.85x) and warm-up is skipped.
 #   --auto-hitl-max-rounds : default is 2, which would end a 150-iteration
 #                            run early with low_confidence_conclusion.
-export AUTOCIM_QAT_TRAIN_SIZE=4096
+export TESSELLATE_QAT_TRAIN_SIZE=4096
 ./.venv/Scripts/python.exe -m main \
   --model-id resnet18 \
   --hw-config examples/hw_configs/calibrated_neurosim_v1_5.json \
