@@ -1,6 +1,6 @@
-"""AutoCIM-Agent CLI entrypoint.
+"""Tessellate CLI entrypoint.
 
-Boots one AutoCIMState session, injects ExecutionContext/HWConfig at the
+Boots one TessellateState session, injects ExecutionContext/HWConfig at the
 config-loading boundary (docs/coding_guidelines.md 5.C -- node/tool logic never hardcodes
 these), streams node execution via `graph.stream()`, and on a dynamic
 `interrupt()` (checklist item 1) prompts the researcher for an override and
@@ -15,7 +15,7 @@ before deciding whether to start a fresh run or resume a persisted one.
 
 `main()` loads `.env` then `.env.local` (the latter overriding, if present
 -- same convention as Next.js/CRA) before touching `argparse`, so
-`AUTOCIM_PLANNER_MODEL`/API keys don't need re-exporting in every new
+`TESSELLATE_PLANNER_MODEL`/API keys don't need re-exporting in every new
 shell. Deliberately *not* done at module import time: `tests/test_main_cli.py`
 imports this module directly, and a stray `.env.local` (real API keys,
 gitignored) silently landing in `os.environ` during a test run would be a
@@ -42,7 +42,7 @@ from graph import build_graph
 from nodes.planner import SEARCH_STRATEGIES, search_bounds
 from middleware import get_hw_config, register_hw_config
 from schemas.config import HWConfig, NoCTopology
-from state import AutoCIMState, merge_dicts
+from state import TessellateState, merge_dicts
 from store import GlobalHWStore, ModelSpecificStore, SqliteLongTermStore
 from llm import resolve_planner_model
 from tools.batch_warmup import run_parallel_warmup
@@ -93,7 +93,7 @@ REPORT_DIR = Path(__file__).resolve().parent / "reports"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run one AutoCIM-Agent optimization session.")
+    parser = argparse.ArgumentParser(description="Run one Tessellate optimization session.")
     parser.add_argument(
         "--model-id",
         default="resnet18",
@@ -893,7 +893,7 @@ def build_initial_state(
     run_seed: int = 0,
     search_strategy: str = "multi_objective",
     search_budget_iterations: Optional[int] = None,
-) -> AutoCIMState:
+) -> TessellateState:
     if allow_approximate_calibration:
         # Default: nearest-KNOWN_REFERENCES fallback (tools/calibration.py)
         # when hw_config has no exact match. When it *does* have an exact
@@ -1243,7 +1243,7 @@ def _format_update(iteration: int, node_name: str, update: Dict[str, Any]) -> st
     dict (full layer_configs, messages, etc.) is real data but far too
     dense to watch live; this pulls out just enough to follow progress at
     a glance. Full detail is still in candidate_history/--dashboard-out/
-    observability.py's JSONL log (AUTOCIM_LOG_STDOUT=1 to also mirror that
+    observability.py's JSONL log (TESSELLATE_LOG_STDOUT=1 to also mirror that
     to stdout) if it's ever needed."""
     prefix = f"[{iteration}] {node_name:<9}:"
     data = ((update.get("metrics_store") or {}).get(node_name) or {}).get("data") or {}
@@ -1650,7 +1650,7 @@ def run_session(
         resumable_input: Any = Command(resume=override)
     else:
         print(
-            f"\nStarting new AutoCIM-Agent session: model_id={model_id!r} "
+            f"\nStarting new Tessellate session: model_id={model_id!r} "
             f"hw_spec_id={hw_config.hw_spec_id!r} thread_id={thread_id!r}"
         )
         # tools/qat.py's _DEFAULT_TRAIN_SIZE/_VAL_SIZE/_TEST_SIZE (512/128/1000)
@@ -1662,7 +1662,7 @@ def run_session(
         print(
             "[QAT] default budget: 512 train / 128 val / 1000 test images, 5 epochs (fast-iteration subset, "
             "not full training) -- low accuracy (e.g. ~15-30% on CIFAR10) at this scale is expected, not a bug. "
-            "AUTOCIM_QAT_TRAIN_SIZE=full and a larger AUTOCIM_QAT_TEST_SIZE widen the dataset for a more realistic number."
+            "TESSELLATE_QAT_TRAIN_SIZE=full and a larger TESSELLATE_QAT_TEST_SIZE widen the dataset for a more realistic number."
         )
         resumable_input = build_initial_state(
             model_id,
@@ -1884,7 +1884,7 @@ def main() -> None:
             # only ever reaches someone who ran `python main.py` with no
             # flags and has no idea yet what any of this does.
             print(
-                "\n[AutoCIM-Agent] --hw-config가 없어 하드웨어 스펙을 대화형으로 고릅니다.\n\n"
+                "\n[Tessellate] --hw-config가 없어 하드웨어 스펙을 대화형으로 고릅니다.\n\n"
                 "  이후 나오는 각 입력창에서 Enter는 대괄호로 표시된 기본값을 그대로 쓰고,\n"
                 "  'b'를 입력하면 이전 단계로 돌아갑니다.\n"
                 "  이후 실제 QAT 학습을 포함한 최적화 세션이 시작되며, 반복마다 수 분 이상 걸릴 수 있습니다.\n\n"
