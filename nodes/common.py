@@ -1,11 +1,11 @@
-"""Shared helpers for AutoCIM-Agent node functions."""
+"""Shared helpers for Tessellate node functions."""
 
 from typing import List
 
 from middleware import get_hw_config
 from schemas.config import ExecutionContext
 from schemas.tools import LayerBitConfig
-from state import AutoCIMState
+from state import TessellateState
 
 
 def default_layer_configs(hw_spec_id: str) -> List[LayerBitConfig]:
@@ -36,7 +36,7 @@ def default_layer_configs(hw_spec_id: str) -> List[LayerBitConfig]:
     ]
 
 
-def run_id_for(state: AutoCIMState) -> str:
+def run_id_for(state: TessellateState) -> str:
     """Deterministic run/session id from state, for anything (execution
     context, observability.py's structured-log correlation id) that needs
     to identify "this run" without LangGraph's real thread id, which lives
@@ -46,7 +46,7 @@ def run_id_for(state: AutoCIMState) -> str:
     return f"{state['model_id']}::{state['hw_spec_id']}"
 
 
-def build_execution_context(state: AutoCIMState) -> ExecutionContext:
+def build_execution_context(state: TessellateState) -> ExecutionContext:
     """Derive this node's ExecutionContext from state, for `middleware.set_execution_context`."""
     return ExecutionContext(
         session_id=run_id_for(state),
