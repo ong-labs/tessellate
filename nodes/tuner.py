@@ -11,12 +11,12 @@ from typing import Any, Dict
 
 from middleware import set_execution_context
 from nodes.common import build_execution_context, default_layer_configs
-from state import AutoCIMState
+from state import TessellateState
 from tools.qat import resolve_max_epochs
 from tools.simulators import tuner_tool
 
 
-def tuner_node(state: AutoCIMState) -> Dict[str, Any]:
+def tuner_node(state: TessellateState) -> Dict[str, Any]:
     set_execution_context(build_execution_context(state))
 
     layer_configs = state.get("planned_layer_configs") or default_layer_configs(state["hw_spec_id"])
