@@ -1,4 +1,4 @@
-"""AutoCIMState and reducers for the LangGraph pipeline.
+"""TessellateState and reducers for the LangGraph pipeline.
 
 Reducers here exist to make parallel fan-in (mapper/profiler -> verifier)
 safe: each node writes only into its own namespace of `metrics_store`, so
@@ -140,7 +140,7 @@ def namespaced_metrics_reducer(left: Dict[str, Any], right: Dict[str, Any]) -> D
     return merged
 
 
-class AutoCIMState(TypedDict):
+class TessellateState(TypedDict):
     messages: Annotated[list, operator.add]
     failure_history: Annotated[list, operator.add]
     candidate_history: Annotated[List[Dict[str, Any]], operator.add]
