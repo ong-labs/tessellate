@@ -1,5 +1,5 @@
 # CPU-only image for portability -- tools/qat.py auto-detects a GPU when one
-# is actually present (AUTOCIM_QAT_DEVICE), but a container has no direct
+# is actually present (TESSELLATE_QAT_DEVICE), but a container has no direct
 # access to the host's GPU without extra runtime flags (--gpus, nvidia-container-toolkit)
 # this image doesn't assume. Not a multi-stage/slim-runtime build -- keeping
 # it simple until there's an actual deployment target to optimize for.
@@ -27,11 +27,11 @@ RUN pip install --no-cache-dir torch==2.13.0 torchvision==0.28.0 --index-url htt
 
 COPY . .
 
-# llm.py defaults AUTOCIM_PLANNER_MODEL to a local Ollama model
+# llm.py defaults TESSELLATE_PLANNER_MODEL to a local Ollama model
 # ("ollama:qwen2.5:7b"), which this container can't reach at its default
 # localhost:11434 -- either point it at the host's Ollama (-e
 # OLLAMA_HOST=http://host.docker.internal:11434) or override
-# AUTOCIM_PLANNER_MODEL to a cloud provider spec plus its matching API key
+# TESSELLATE_PLANNER_MODEL to a cloud provider spec plus its matching API key
 # (ANTHROPIC_API_KEY / OPENAI_API_KEY / GROQ_API_KEY / GOOGLE_API_KEY -- see
 # README.md's verified-provider table). Deliberately not set here -- pass
 # these at `docker run` time (-e), never bake credentials into an image.
