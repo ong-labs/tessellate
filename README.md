@@ -1,4 +1,4 @@
-# AutoCIM-Agent
+# Tessellate
 
 **CIM(Compute-In-Memory) 반도체를 위한 LangGraph 기반 8-노드 폐루프 HW-SW 공동설계 연구 플랫폼 — 사람의 검토를 전제로 후보를 생성·검증하는 도구** (LLM의 역할은 의도적으로 제한돼 있습니다 — [아래](#이-프로젝트는-멀티에이전트-시스템이-아닙니다) 참고)
 
@@ -68,7 +68,7 @@ graph TD
 
 ## 실측으로 확인한 것 — 이 시스템이 잘하는 것과 아직 못하는 것
 
-이 섹션은 "탐색이 낫다"를 주장하려는 게 아니라, `tools/baseline_compare.py`로 실제 QAT 학습·실제 물리 시뮬레이션을 돌려 얻은 **있는 그대로의 결과**를 보고합니다 (재현: `AUTOCIM_QAT_TRAIN_SIZE=4096 python -m tools.baseline_compare --model-id resnet18 --hw-config examples/hw_configs/default_cim_v1_128x128.json --seeds 3 --grid --target-accuracy 0.7 --search-budget-iterations 30`).
+이 섹션은 "탐색이 낫다"를 주장하려는 게 아니라, `tools/baseline_compare.py`로 실제 QAT 학습·실제 물리 시뮬레이션을 돌려 얻은 **있는 그대로의 결과**를 보고합니다 (재현: `TESSELLATE_QAT_TRAIN_SIZE=4096 python -m tools.baseline_compare --model-id resnet18 --hw-config examples/hw_configs/default_cim_v1_128x128.json --seeds 3 --grid --target-accuracy 0.7 --search-budget-iterations 30`).
 
 > **에너지 수치 기준**: 아래 항목 중 형상 인식 물리 모델 도입(§로드맵) 이전에 측정된 것들은 **재측정을 완료했고**, 각 항목에 옛 수치와 새 수치를 함께 남겼습니다. 절대값은 약 70배 커졌지만(형상 미반영 → 반영), **결론은 두 건 모두 유지됐습니다.** 재측정 자체가 만든 새 발견(프루닝 보상의 계단 특성)은 아래 별도 항목으로 적었습니다.
 >
@@ -77,8 +77,8 @@ graph TD
 > **상대 결론은 영향받지 않습니다**: 보정 계수는 모든 후보의 `compute_energy_pj`에 동일하게 곱해지는 단일 배수라, "몇 % 절감"류의 비교는 그대로입니다. 영향받는 건 pJ 절대값뿐입니다. 아래에서 **2026-08-20에 실제로 재측정한 항목은 새 수치로 교체**했고, 재측정하지 않은 항목(Optuna 비교 등)은 옛 수치를 남기되 이 정정 대상임을 표시했습니다 — 임의로 2.48을 나눠 적는 것은 하지 않은 측정을 한 것처럼 보이게 하므로 하지 않았습니다.
 
 - **제약 없는 다중목적 탐색은 정확도를 크게 희생할 수 있습니다.** `--target-accuracy`를 안 주고 돌리면, 탐색이 찾은 후보(정확도 0.243)가 "탐색을 아예 안 한" 균일 설정(weight_bits=8, pruning 없음, 정확도 0.745)보다 에너지는 약 11% 낮지만 정확도는 크게 낮았습니다 — 둘 다 각자의 목적함수 기준으로는 유효한 Pareto 지점이지만, 정확도 하한을 명시하지 않으면 탐색이 그 방향으로 갈 수 있다는 뜻입니다.
-- **정확도 목표를 걸어도 탐색이 항상 성공하진 않습니다.** `--target-accuracy 0.7`로 재실행했을 때 3개 시드 중 1개만 수렴했습니다. 원인을 QAT 예산(에폭 수)과 서로게이트 워밍업 후보 수로 나눠 실측 진단한 결과, 둘 다 부분적으로만 도움이 됐습니다(각각 실패했던 시드 하나씩만 구제) — 코드에 이미 반영된 개선(`AUTOCIM_QAT_MAX_EPOCHS` env var, 워밍업 공식 개선)에도 불구하고 완전한 신뢰성은 아직 없습니다.
-- **이 미수렴이 탐색/대리모델의 결함이 아니라 정확도 천장 효과일 수 있습니다.** 위 진단을 더 파고들어 `target_accuracy`만 바꿔가며 재실행한 결과(resnet18, `default_cim_v1_128x128.json`, 기본 QAT 예산, 시드 0~2): `0.65` → 3/3 수렴(정확도 0.670/0.693/0.702), `0.70`/`0.75` → 둘 다 0/3 수렴하며 최고 성능도 각각 0.699/0.683에 그쳤습니다 — 탐색 iteration을 auto-hitl 상한(2라운드, 약 24회)까지 다 써도 0.71을 못 넘었습니다. 즉 이 하드웨어/QAT 예산 조합에서 도달 가능한 정확도 천장이 대략 0.67~0.71 근방에 있고, `target_accuracy=0.7`이 그 천장 바로 위에 걸려있어 통과/실패가 QAT 학습 자체의 노이즈에 좌우되는 상태에 가깝습니다 — 대리모델을 더 정교하게(예: Gaussian Process 기반) 바꾼다고 해서 이 특정 실패가 해결되진 않을 것으로 보입니다. 도달 가능한 정확도 자체를 올리려면 QAT 학습 데이터 크기(`AUTOCIM_QAT_TRAIN_SIZE`, 기본 512장) 확대가 다음으로 시도해볼 유력한 레버입니다 — 아래서 검증했습니다.
+- **정확도 목표를 걸어도 탐색이 항상 성공하진 않습니다.** `--target-accuracy 0.7`로 재실행했을 때 3개 시드 중 1개만 수렴했습니다. 원인을 QAT 예산(에폭 수)과 서로게이트 워밍업 후보 수로 나눠 실측 진단한 결과, 둘 다 부분적으로만 도움이 됐습니다(각각 실패했던 시드 하나씩만 구제) — 코드에 이미 반영된 개선(`TESSELLATE_QAT_MAX_EPOCHS` env var, 워밍업 공식 개선)에도 불구하고 완전한 신뢰성은 아직 없습니다.
+- **이 미수렴이 탐색/대리모델의 결함이 아니라 정확도 천장 효과일 수 있습니다.** 위 진단을 더 파고들어 `target_accuracy`만 바꿔가며 재실행한 결과(resnet18, `default_cim_v1_128x128.json`, 기본 QAT 예산, 시드 0~2): `0.65` → 3/3 수렴(정확도 0.670/0.693/0.702), `0.70`/`0.75` → 둘 다 0/3 수렴하며 최고 성능도 각각 0.699/0.683에 그쳤습니다 — 탐색 iteration을 auto-hitl 상한(2라운드, 약 24회)까지 다 써도 0.71을 못 넘었습니다. 즉 이 하드웨어/QAT 예산 조합에서 도달 가능한 정확도 천장이 대략 0.67~0.71 근방에 있고, `target_accuracy=0.7`이 그 천장 바로 위에 걸려있어 통과/실패가 QAT 학습 자체의 노이즈에 좌우되는 상태에 가깝습니다 — 대리모델을 더 정교하게(예: Gaussian Process 기반) 바꾼다고 해서 이 특정 실패가 해결되진 않을 것으로 보입니다. 도달 가능한 정확도 자체를 올리려면 QAT 학습 데이터 크기(`TESSELLATE_QAT_TRAIN_SIZE`, 기본 512장) 확대가 다음으로 시도해볼 유력한 레버입니다 — 아래서 검증했습니다.
 - **QAT 학습 데이터를 8배(512→4096장)로 늘렸더니 정확도 천장 가설이 확인됐습니다.** 같은 조건(resnet18, `default_cim_v1_128x128.json`, `target_accuracy=0.7`, 시드 0~2)에서 `tools/baseline_compare.py --seeds 3 --grid`를 재실행한 결과, 탐색(search)이 **0/3 → 3/3 수렴**으로 바뀌었습니다(정확도 0.84/0.86/0.85). 즉 앞서 발견한 미수렴은 탐색/대리모델의 결함이 아니라 정말로 QAT 학습 예산 부족이 원인이었다는 게 실측으로 확인됐습니다. 다만 이 스케일에서도 탐색은 여전히 균일 설정 베이스라인보다 낮은 정확도로 수렴하는데, 대신 에너지가 더 낮습니다 — 이건 버그가 아니라 다중목적 탐색이 정확도-에너지 트레이드오프를 의도대로 반영하고 있다는 뜻입니다(위 "제약 없는 다중목적 탐색은 정확도를 크게 희생할 수 있습니다" 항목과 같은 패턴). **형상 인식 물리 모델로 재측정한 결과(2026-08-14, 동일 조건 3시드)도 이 결론을 유지했습니다**:
 >
 > | | 옛 물리 모델 | 새 물리 모델 (2026-08-14) |
@@ -110,7 +110,7 @@ graph TD
 > | 2 | 0.877 | 2,095k | 699 | 프루닝 없음 |
 >
 > 3시드 중 2개는 프루닝 없이 **그리드 최고점(0.899 / 2,095k)과 사실상 같은 지점**에 도달했습니다 — 탐색이 그리드에 지고 있던 게 아닙니다. 격차는 시드 0 하나가 만든 것이고, 그 원인은 탐색 품질이 아니라 **`@evaluator`가 목표를 만족하는 *첫* 후보에서 멈추는 satisficing 동작**입니다(`tools/targets.py`의 `check_targets`). 시드 0은 0.704를 찾자마자 목표 0.7을 충족해 정지했습니다. 반면 그리드는 9개 점을 전부 평가한 뒤 그 중 **최고점**을 보고합니다 — 애초에 공정한 비교가 아니었습니다. "탐색이 균일 그리드보다 못하다"는 앞선 해석은 이 비대칭과 평균 착시가 겹친 결과였습니다. 위 두 결과가 정확히 이 아키텍처(위 다이어그램에서 강조 표시한 `hitl_human_approval`/`__end__`)가 "최종 자동 확정"이 아니라 "사람이 검토할 후보 생성"으로 설계된 이유입니다.
-- **같은 규칙으로 다시 비교했더니, 시드 편차는 탐색이 아니라 정지 규칙이 만든 것이었습니다 (2026-08-20).** 위 진단을 코드로 옮겨 `search_budget_iterations`(state.py)를 추가했습니다 — 목표를 만족한 *첫* 후보에서 멈추는 대신, 정해진 횟수만큼 탐색한 뒤 **목표를 충족한 후보 중 최선**을 고릅니다. 이건 그리드가 이미 쓰던 규칙(`best_grid_point`: 전부 평가하고 최고점 보고)과 **동일한 선택 규칙**입니다. 그리드 쪽도 프루닝 비율에 0.25/0.5를 넣어 타일 경계를 실제로 넘게 했습니다(9점 → 15점). 재실행(`--seeds 3 --grid --target-accuracy 0.7 --search-budget-iterations 30`, `AUTOCIM_QAT_TRAIN_SIZE=4096`):
+- **같은 규칙으로 다시 비교했더니, 시드 편차는 탐색이 아니라 정지 규칙이 만든 것이었습니다 (2026-08-20).** 위 진단을 코드로 옮겨 `search_budget_iterations`(state.py)를 추가했습니다 — 목표를 만족한 *첫* 후보에서 멈추는 대신, 정해진 횟수만큼 탐색한 뒤 **목표를 충족한 후보 중 최선**을 고릅니다. 이건 그리드가 이미 쓰던 규칙(`best_grid_point`: 전부 평가하고 최고점 보고)과 **동일한 선택 규칙**입니다. 그리드 쪽도 프루닝 비율에 0.25/0.5를 넣어 타일 경계를 실제로 넘게 했습니다(9점 → 15점). 재실행(`--seeds 3 --grid --target-accuracy 0.7 --search-budget-iterations 30`, `TESSELLATE_QAT_TRAIN_SIZE=4096`):
 >
 > | | 수렴 | 정확도 (95% CI) | 에너지 pJ (95% CI) |
 > |---|---|---|---|
@@ -127,14 +127,14 @@ graph TD
 - 이 진단 과정에서 `tools/repeat_search.py`의 실제 버그(워밍업 후보를 최선 시도로 착각하는 버그)도 발견해 수정했습니다 — 실측으로 실제 실행해보지 않았다면 유닛 테스트만으로는 못 잡았을 종류의 문제였습니다.
 - **정확도 천장은 QAT 학습 데이터가 정하고, 그 레버는 이미 소진돼 있었습니다 (2026-08-22).** 목표를 어디에 걸지 정하려고, 압축을 아예 하지 않은 설정(균일 8비트·프루닝 없음)의 정확도를 학습 데이터 크기별로 직접 재봤습니다 (`calibrated_neurosim_v1_5.json`, 시드 0):
 
-  > | `AUTOCIM_QAT_TRAIN_SIZE` | 1,024 | 4,096 | 8,192 | 16,384 |
+  > | `TESSELLATE_QAT_TRAIN_SIZE` | 1,024 | 4,096 | 8,192 | 16,384 |
   > |---|---|---|---|---|
   > | 정확도 | 0.822 | 0.907 | 0.910 | **0.893** |
   > | 소요 | 25초 | 65초 | 118초 | 228초 |
 
   4,096 → 8,192는 +0.003뿐이고 **16,384에서는 오히려 떨어집니다.** 512 → 4,096에서 크게 작동했던 "데이터를 늘리면 천장이 올라간다"는 레버가 4,096 근처에서 이미 소진돼 있고, 그 위로는 학습 노이즈(±0.015 수준)가 더 큽니다. 이 측정이 없었다면 `target_accuracy`를 천장 위(0.91~0.95)에 걸어 3시간을 버렸을 것입니다 — **목표치는 추측이 아니라 천장을 먼저 재고 정해야 합니다.**
 
-- **문헌 보정 하드웨어에서 150회 예산으로 재측정했고, 선택 규칙의 한계가 드러났습니다 (2026-08-22, 200분).** 앞선 비교는 미보정 `default_cim_v1_128x128`에서 나온 것이라, 문헌 대조가 가능한 `calibrated_neurosim_v1_5.json`(128×128, ADC 7비트, NeuroSim V1.5 논문 0.047 pJ/MAC 기준)으로 옮겨 다시 돌렸습니다. 재현: `AUTOCIM_QAT_TRAIN_SIZE=4096 python -m main --model-id resnet18 --hw-config examples/hw_configs/calibrated_neurosim_v1_5.json --target-accuracy 0.88 --search-budget-iterations 150 --auto-hitl --auto-hitl-max-rounds 30 --ignore-learned-state`. 그리드는 같은 하드웨어에서 15개 지점을 따로 측정했습니다 (`runs/2026-08-22_neurosim_0p88/`에 터미널 로그·이벤트·리포트·체크포인트·그리드 로그 전량 보존).
+- **문헌 보정 하드웨어에서 150회 예산으로 재측정했고, 선택 규칙의 한계가 드러났습니다 (2026-08-22, 200분).** 앞선 비교는 미보정 `default_cim_v1_128x128`에서 나온 것이라, 문헌 대조가 가능한 `calibrated_neurosim_v1_5.json`(128×128, ADC 7비트, NeuroSim V1.5 논문 0.047 pJ/MAC 기준)으로 옮겨 다시 돌렸습니다. 재현: `TESSELLATE_QAT_TRAIN_SIZE=4096 python -m main --model-id resnet18 --hw-config examples/hw_configs/calibrated_neurosim_v1_5.json --target-accuracy 0.88 --search-budget-iterations 150 --auto-hitl --auto-hitl-max-rounds 30 --ignore-learned-state`. 그리드는 같은 하드웨어에서 15개 지점을 따로 측정했습니다 (`runs/2026-08-22_neurosim_0p88/`에 터미널 로그·이벤트·리포트·체크포인트·그리드 로그 전량 보존).
 
   > | | 정확도 | 에너지 (pJ) |
   > |---|---|---|
@@ -166,12 +166,12 @@ graph TD
 - **2단계 다중 충실도(Multi-fidelity) 검증**: 정밀 시뮬레이터(NeuroSim/CIM-Loop 등)는 회로 연산이 포함돼 있어 탐색 중인 모든 후보를 검증하기엔 비용이 큽니다. 이 프로젝트는 `@evaluator`의 fast-approximation이 수렴으로 판단한 (탐색 전체가 아니라 극히 일부인) 후보만 골라 `@precision_verifier`에서 다시 검증하고, 그 결과로 `calibration_factors`를 자동 갱신해 이후 후보들의 근사 정확도까지 함께 개선하는 폐루프를 구성했습니다. 실제 세션에서 확인한 예(당시 계산이 전부 Mock이던 시점의 기록): 11번째 반복에서 근사 모델이 `energy_pj=69.72416`으로 수렴 판정했고, 2단계 재검증이 `73.210368`(보정 계수 `1.05x`)을 산출해 최종 수렴 및 `calibration_factors`/`calibration_provenance` 갱신까지 그래프 라우팅 그대로 이어짐을 확인했습니다. 현재는 이 재검증의 ADC 에너지 항이 `hwcomponents_adc`(문헌 기반 실제 모델)로 교체되어, 위 예시의 `1.05x`보다 훨씬 큰 보정 계수가 나올 수 있고, Docker 이미지에서는 DAC·크로스바-MAC 에너지도 `hwcomponents_neurosim`(실제 NeuroSim 모델)으로, SRAM 버퍼 에너지도 `hwcomponents_cacti`(실제 CACTI 모델)로 함께 교체됩니다 — 로컬(비-Docker) 환경에서는 이 세 항이 여전히 fast-approximation 자리 표시자입니다.
 
 ## 주요 기능
-- **로컬 우선 LLM**: `@planner`는 기본적으로 로컬 Ollama 모델(`ollama:qwen2.5:7b`)을 사용 -- 하드웨어 스펙이 외부로 나가지 않음. `AUTOCIM_PLANNER_MODEL`로 클라우드 provider를 opt-in 가능
+- **로컬 우선 LLM**: `@planner`는 기본적으로 로컬 Ollama 모델(`ollama:qwen2.5:7b`)을 사용 -- 하드웨어 스펙이 외부로 나가지 않음. `TESSELLATE_PLANNER_MODEL`로 클라우드 provider를 opt-in 가능
 - **세션 영속성**: `SqliteSaver` 기반 체크포인트로 프로세스 재시작 후에도 `--thread-id`로 재개
 - **HITL(Human-in-the-Loop)**: 수렴 정체 시 연구원 개입 요청 (dynamic `interrupt()`)
 - **LLM 호출 운영**: 재시도/지수 백오프, rate-limit 대응, 토큰/비용 추적, 누적 비용·토큰 상한(kill-switch), 설정된 provider가 재시도를 모두 소진해도 계속 실패하면 로컬 기본 모델로 자동 전환(cross-provider fallback) -- 그마저 실패해도 탐색 자체(`stage_configs`)는 LLM 성공 여부와 무관하게 항상 진행되므로, 이 전환은 파이프라인이 멈추는 걸 막는 게 아니라 rationale이 LLM 설명 없는 템플릿으로 대체되는 빈도를 줄이는 역할입니다
 - **구조화된 관측성**: iteration별 JSON Lines 로그(`observability.py`) + 후보/Pareto front 이동을 보여주는 HTML 대시보드(`tools/dashboard.py`)
-- **GPU 자동 감지**: `tools/qat.py`가 CUDA → Apple MPS → CPU 순으로 자동 감지 (`AUTOCIM_QAT_DEVICE`로 override 가능)
+- **GPU 자동 감지**: `tools/qat.py`가 CUDA → Apple MPS → CPU 순으로 자동 감지 (`TESSELLATE_QAT_DEVICE`로 override 가능)
 - **병렬 워밍업**: LHS 워밍업 후보들은 서로 독립적이므로, 새 세션 시작 시 순차 그래프 루프 진입 전에 스레드 풀에서 한번에 동시 평가 (`tools/batch_warmup.py`) -- HITL 개입 없이 워밍업 전체가 자동으로 끝남. 스레드 수는 `--parallel-warmup-workers`로 조절 가능
 
 ## 설치
@@ -216,11 +216,11 @@ ollama serve   # 보통 설치 시 자동으로 백그라운드 서비스로 등
 python main.py --model-id resnet18 --dashboard-out report.html
 ```
 
-클라우드 provider를 쓰고 싶으면 `AUTOCIM_PLANNER_MODEL`을 설정하면 됩니다 (`langchain.chat_models.init_chat_model` 스펙 문자열). `.env.example`을 `.env.local`로 복사해 값을 채우면 -- `main.py`가 실행할 때마다 자동으로 읽어들이므로 (import 시점이 아니라 `python main.py` 실행 시점에만; gitignore됨) -- 터미널을 새로 열 때마다 다시 `export`할 필요가 없습니다:
+클라우드 provider를 쓰고 싶으면 `TESSELLATE_PLANNER_MODEL`을 설정하면 됩니다 (`langchain.chat_models.init_chat_model` 스펙 문자열). `.env.example`을 `.env.local`로 복사해 값을 채우면 -- `main.py`가 실행할 때마다 자동으로 읽어들이므로 (import 시점이 아니라 `python main.py` 실행 시점에만; gitignore됨) -- 터미널을 새로 열 때마다 다시 `export`할 필요가 없습니다:
 
 ```bash
 cp .env.example .env.local
-# .env.local을 열어 AUTOCIM_PLANNER_MODEL과 해당 provider의 API 키를 채우기
+# .env.local을 열어 TESSELLATE_PLANNER_MODEL과 해당 provider의 API 키를 채우기
 
 python main.py --model-id resnet18 --dashboard-out report.html
 ```
@@ -228,7 +228,7 @@ python main.py --model-id resnet18 --dashboard-out report.html
 또는 기존처럼 셸에서 직접 `export`해도 동일하게 동작합니다:
 
 ```bash
-export AUTOCIM_PLANNER_MODEL="anthropic:claude-sonnet-4-5-20250929"
+export TESSELLATE_PLANNER_MODEL="anthropic:claude-sonnet-4-5-20250929"
 export ANTHROPIC_API_KEY="..."
 
 python main.py --model-id resnet18 --dashboard-out report.html
@@ -285,19 +285,19 @@ python main.py --model-id resnet18 --hw-config examples/hw_configs/default_cim_v
 
 | 변수 | 용도 |
 |---|---|
-| `AUTOCIM_PLANNER_MODEL` | (옵션) LLM provider:model 스펙 -- 생략 시 로컬 `ollama:qwen2.5:7b` 사용 |
-| `AUTOCIM_LLM_MAX_RETRIES` / `_BASE_DELAY_SECONDS` / `_MAX_DELAY_SECONDS` | LLM 호출 재시도/백오프 튜닝 |
-| `AUTOCIM_LLM_COST_PER_1K_INPUT_USD` / `_OUTPUT_USD` | 토큰당 비용 추정 활성화 (미설정 시 비용은 항상 `null`) |
-| `AUTOCIM_LLM_MAX_TOTAL_COST_USD` / `AUTOCIM_LLM_MAX_TOTAL_TOKENS` | 런 전체 누적 상한 도달 시 LLM 호출 자체를 중단 |
-| `AUTOCIM_LOG_DIR` | 구조화 로그(JSONL) 저장 위치 (기본 `.cache/logs/`) |
-| `AUTOCIM_QAT_TRAIN_SIZE` / `_VAL_SIZE` / `_TEST_SIZE` / `_BATCH_SIZE` | QAT fine-tuning/평가 데이터셋 크기 (기본 512/128/1000/32 — CIFAR10 데모 서브셋). `TRAIN_SIZE`/`TEST_SIZE`는 `full`로 설정하면 해당 split 전체 사용 (wall-clock 증가) |
-| `AUTOCIM_QAT_SEED` | QAT train/val/test 분할 시드 (기본 0) |
-| `AUTOCIM_QAT_DEVICE` | QAT 학습에 사용할 디바이스 (`cuda`, `mps`, `cpu`, `cuda:0` 등). 미설정 시 CUDA → MPS → CPU 순으로 자동 감지 |
+| `TESSELLATE_PLANNER_MODEL` | (옵션) LLM provider:model 스펙 -- 생략 시 로컬 `ollama:qwen2.5:7b` 사용 |
+| `TESSELLATE_LLM_MAX_RETRIES` / `_BASE_DELAY_SECONDS` / `_MAX_DELAY_SECONDS` | LLM 호출 재시도/백오프 튜닝 |
+| `TESSELLATE_LLM_COST_PER_1K_INPUT_USD` / `_OUTPUT_USD` | 토큰당 비용 추정 활성화 (미설정 시 비용은 항상 `null`) |
+| `TESSELLATE_LLM_MAX_TOTAL_COST_USD` / `TESSELLATE_LLM_MAX_TOTAL_TOKENS` | 런 전체 누적 상한 도달 시 LLM 호출 자체를 중단 |
+| `TESSELLATE_LOG_DIR` | 구조화 로그(JSONL) 저장 위치 (기본 `.cache/logs/`) |
+| `TESSELLATE_QAT_TRAIN_SIZE` / `_VAL_SIZE` / `_TEST_SIZE` / `_BATCH_SIZE` | QAT fine-tuning/평가 데이터셋 크기 (기본 512/128/1000/32 — CIFAR10 데모 서브셋). `TRAIN_SIZE`/`TEST_SIZE`는 `full`로 설정하면 해당 split 전체 사용 (wall-clock 증가) |
+| `TESSELLATE_QAT_SEED` | QAT train/val/test 분할 시드 (기본 0) |
+| `TESSELLATE_QAT_DEVICE` | QAT 학습에 사용할 디바이스 (`cuda`, `mps`, `cpu`, `cuda:0` 등). 미설정 시 CUDA → MPS → CPU 순으로 자동 감지 |
 
 ## Docker
 
 ```bash
-docker build -t autocim-agent .
+docker build -t tessellate .
 ```
 
 `.cache/`(체크포인트 DB, 다운로드된 모델 가중치/CIFAR10)를 마운트하지 않으면 `--rm`으로 컨테이너가 사라질 때 전부 같이 사라집니다 -- 매 실행마다 다시 다운로드하고, `--thread-id` 세션 재개도 안 됩니다. `--dashboard-out`으로 쓰는 파일도 마찬가지로 마운트해야 컨테이너 밖에서 열어볼 수 있습니다:
@@ -307,12 +307,12 @@ docker run --rm \
   --env-file .env.local \
   -v "$(pwd)/.cache:/app/.cache" \
   -v "$(pwd)/report.html:/app/report.html" \
-  autocim-agent --model-id resnet18 --dashboard-out report.html
+  tessellate --model-id resnet18 --dashboard-out report.html
 ```
 
-(`--env-file .env.local`은 `-e AUTOCIM_PLANNER_MODEL=... -e ANTHROPIC_API_KEY=...`를 하나씩 나열하는 대신 `.env.local` 내용을 그대로 전달합니다.)
+(`--env-file .env.local`은 `-e TESSELLATE_PLANNER_MODEL=... -e ANTHROPIC_API_KEY=...`를 하나씩 나열하는 대신 `.env.local` 내용을 그대로 전달합니다.)
 
-> **로컬 Ollama 기본값과 Docker**: 컨테이너 안에서는 `ollama:qwen2.5:7b` 기본값이 가리키는 `localhost:11434`가 컨테이너 자신을 가리켜 호스트의 Ollama에 닿지 않습니다. `-e OLLAMA_HOST=http://host.docker.internal:11434`로 호스트의 Ollama를 가리키거나, `.env.local`에서 `AUTOCIM_PLANNER_MODEL`을 클라우드 provider로 오버라이드하세요.
+> **로컬 Ollama 기본값과 Docker**: 컨테이너 안에서는 `ollama:qwen2.5:7b` 기본값이 가리키는 `localhost:11434`가 컨테이너 자신을 가리켜 호스트의 Ollama에 닿지 않습니다. `-e OLLAMA_HOST=http://host.docker.internal:11434`로 호스트의 Ollama를 가리키거나, `.env.local`에서 `TESSELLATE_PLANNER_MODEL`을 클라우드 provider로 오버라이드하세요.
 
 > **Docker 이미지에서만 활성화되는 실제 시뮬레이터**: `requirements-docker.txt`가 `requirements.txt` 위에 `hwcomponents-neurosim`과 `hwcomponents-cacti`를 추가로 설치합니다 -- 전자는 `pip install` 시점에 NeuroSim의 실제 C++ 소스를 `make`/`g++`로 컴파일하므로(이미지에 `build-essential` 설치 단계 포함, 첫 빌드가 그만큼 오래 걸림) C++ 툴체인이 없는 로컬 환경에서는 애초에 설치할 수 없고, 후자는 컴파일은 필요 없지만 POSIX 전용 `fcntl`을 import해서 Windows에서 로드 자체가 안 됩니다. 설치되면 `@precision_verifier`(`tools/precision_check.py`)의 DAC/크로스바-MAC 에너지 항이 NeuroSim의 실제 device 모델(`RowDrivers`/`MemoryCell`)로, SRAM 버퍼 스테이징 에너지(`HWConfig.sram_buffer_kb` 설정 시)가 CACTI의 실제 `SRAM` 모델로 자동 전환됩니다 -- 코드 변경 없이, Docker로 실행한다는 사실 자체가 이 전환을 켭니다. `--hw-config`에 `device_type`(`rram`/`sram`/`pcm`/`sttram`)을 명시하면 NeuroSim의 제네릭 placeholder 셀 대신 해당 소자의 실제 NVMExplorer-fit `.cell` 설정을 사용합니다 (`examples/hw_configs/`의 `calibrated_*.json`들이 이미 이렇게 설정돼 있음); 생략하면 여전히 placeholder 셀로 폴백합니다.
 
@@ -382,8 +382,8 @@ examples/custom_model_dataset/ # --model-id/--dataset-id 커스텀 스펙 예시
 - **`tools/calibration.py` 참조 매칭에 device_type 반영** — `find_matching_reference()`가 `(crossbar_rows, crossbar_cols, adc_bits)`만으로 매칭해서 같은 키를 공유하는 문헌이 있으면 disambiguate를 못 하던 문서화된 gap을 device_type으로 해소. 이 작업 중, 예전에 FeFET 레퍼런스 추가 시 같은 키((64,64,4비트 ADC))를 두고 제거됐던 Dong/Sinangil SRAM 레퍼런스를 device_type으로 구분 가능해진 김에 복원 — 그 결과 `examples/hw_configs/calibrated_dong_2020_sram_64x64.json`이 (KNOWN_REFERENCES에 Dong 항목이 없어) 실제로는 FeFET 수치로 조용히 보정되고 있던 기존 버그도 함께 발견해 수정. FeFET 자체는 `CIMDeviceType`에 대응 값이 없어(NeuroSim에 FeFET 셀 없음) 이제 device_type 미지정 상태로는 exact-match로 도달할 수 없게 됐고(2개 후보가 애매하게 걸림 → 우연히 맞히지 않고 미보정 처리), `--allow-approximate-calibration` 경로로는 여전히 접근 가능. 이 disambiguation은 main.py의 실제 기본 실행 경로(`allow_approximate_calibration=True`)가 쓰는 `find_nearest_reference()`에도 처음에는 반영이 안 돼 있었는데, 실제 e2e 실행으로 발견해서 같이 수정.
 - **`tools/repeat_search.py`에 신뢰구간 추가** — 기존 mean/stdev/min/max에 Student's t 95% 신뢰구간을 추가(`scipy.stats.t`, pymoo 경유로 이미 설치돼있던 의존성이라 새 패키지 불필요). N이 작을 때(핸드풀 수준의 replicate) 구간이 넓게 나오는 걸 숨기지 않고 오히려 "이 정도 N으로는 이만큼만 확신할 수 있다"는 정직한 신호로 보고.
 - **`tools/baseline_compare.py` 추가 — 미탐색 기준선 대비 비교** — `tools/run_ablation.py`가 이 프로젝트의 탐색 전략끼리만(multi_objective/single_objective/random) 비교하고 사람이 손으로 고른(또는 아예 최적화 안 한) 설계와는 비교한 적이 없던 gap을 메움. 모든 stage에 균일한 weight_bits/activation_bits(기본 8/8)·pruning 없음(0.0)을 고정한 "탐색 안 한" 기준선을 `tools/batch_warmup.py`의 warm-up 후보와 동일한 tuner→mapper→profiler→verifier 경로로 평가하고, 실제 탐색 결과와 동일한 시드 범위·`tools/repeat_search.py`의 신뢰구간 집계로 나란히 비교. `python -m tools.baseline_compare --model-id ... --hw-config ... --seeds N`으로 실행. `--grid`로 균일 (weight_bits, pruning_ratio) 그리드 스윕(단일 시드, 코스한 point estimate)도 추가 가능.
-- **탐색 신뢰성 진단 + 개선 (실측 기반)** — `--target-accuracy`를 건 `tools/baseline_compare.py` 실행에서 resnet18 탐색이 3번 중 1번만 수렴하는 걸 발견하고, 원인이 QAT 예산(5 epoch)인지 서로게이트 워밍업 후보 수(`_MAX_WARMUP_CANDIDATES=12`)인지 실측으로 분리 검증. (1) `AUTOCIM_QAT_MAX_EPOCHS` env var 추가(`tools/qat.py`의 `resolve_max_epochs()` — 기존 `nodes/tuner.py`/`tools/batch_warmup.py`에 중복돼 있던 `_DEFAULT_MAX_EPOCHS` 상수를 하나로 통합), 2배로 늘려 재테스트 — 실패했던 시드 중 하나를 구제. (2) `warmup_count()`가 실제로는 `n_stages`(resnet18=10)에서 이미 캡이 걸려서 `_MAX_WARMUP_CANDIDATES=12`를 늘려도 아무 효과가 없다는 걸 발견 — stage당 1개가 아니라 `_WARMUP_SAMPLES_PER_STAGE=1.5`개로 샘플링하도록 공식 자체를 바꾸고 캡도 20으로 올림(resnet18: 10→15개). 재테스트 결과 실패했던 다른 시드 하나가 auto-hitl 재시도 없이 바로 수렴 — 두 레버 모두 부분적으로 유효하지만 어느 쪽도 100% 신뢰성을 보장하지 않음(각 실험에서 나머지 시드 하나는 여전히 실패). 이 진단 과정에서 `tools/repeat_search.py::_best_candidate`의 실제 버그도 발견: warm-up 후보는 `target_accuracy` 게이팅 없이 물리적 수렴 여부만으로 자신의 `is_converged`를 설정하는데, `_best_candidate`가 이를 세션 전체의 수렴 여부와 혼동해서 탐색이 실패한 세션에서 항상 (진짜 최선이 아닌) 임의의 warm-up 후보를 반환하고 있었음 — `session_is_converged`를 명시적으로 받도록 시그니처를 바꿔 수정.
-- **QAT를 실배포 규모(4096 이미지)로 재검증** — `AUTOCIM_QAT_TRAIN_SIZE`/`AUTOCIM_QAT_MAX_EPOCHS`로 CIFAR10 서브셋 규모를 4096장까지 늘려 재실측. 이전에 관찰된 accuracy ceiling이 서치/서로게이트 버그가 아니라 QAT 학습 데이터 규모 자체의 한계였음을 확인 — 탐색은 3세드 모두 수렴(accuracy 0.84/0.86/0.85), 기준선 대비 에너지 ~10% 절감이라는 트레이드오프도 이 규모에서 재확인됨.
+- **탐색 신뢰성 진단 + 개선 (실측 기반)** — `--target-accuracy`를 건 `tools/baseline_compare.py` 실행에서 resnet18 탐색이 3번 중 1번만 수렴하는 걸 발견하고, 원인이 QAT 예산(5 epoch)인지 서로게이트 워밍업 후보 수(`_MAX_WARMUP_CANDIDATES=12`)인지 실측으로 분리 검증. (1) `TESSELLATE_QAT_MAX_EPOCHS` env var 추가(`tools/qat.py`의 `resolve_max_epochs()` — 기존 `nodes/tuner.py`/`tools/batch_warmup.py`에 중복돼 있던 `_DEFAULT_MAX_EPOCHS` 상수를 하나로 통합), 2배로 늘려 재테스트 — 실패했던 시드 중 하나를 구제. (2) `warmup_count()`가 실제로는 `n_stages`(resnet18=10)에서 이미 캡이 걸려서 `_MAX_WARMUP_CANDIDATES=12`를 늘려도 아무 효과가 없다는 걸 발견 — stage당 1개가 아니라 `_WARMUP_SAMPLES_PER_STAGE=1.5`개로 샘플링하도록 공식 자체를 바꾸고 캡도 20으로 올림(resnet18: 10→15개). 재테스트 결과 실패했던 다른 시드 하나가 auto-hitl 재시도 없이 바로 수렴 — 두 레버 모두 부분적으로 유효하지만 어느 쪽도 100% 신뢰성을 보장하지 않음(각 실험에서 나머지 시드 하나는 여전히 실패). 이 진단 과정에서 `tools/repeat_search.py::_best_candidate`의 실제 버그도 발견: warm-up 후보는 `target_accuracy` 게이팅 없이 물리적 수렴 여부만으로 자신의 `is_converged`를 설정하는데, `_best_candidate`가 이를 세션 전체의 수렴 여부와 혼동해서 탐색이 실패한 세션에서 항상 (진짜 최선이 아닌) 임의의 warm-up 후보를 반환하고 있었음 — `session_is_converged`를 명시적으로 받도록 시그니처를 바꿔 수정.
+- **QAT를 실배포 규모(4096 이미지)로 재검증** — `TESSELLATE_QAT_TRAIN_SIZE`/`TESSELLATE_QAT_MAX_EPOCHS`로 CIFAR10 서브셋 규모를 4096장까지 늘려 재실측. 이전에 관찰된 accuracy ceiling이 서치/서로게이트 버그가 아니라 QAT 학습 데이터 규모 자체의 한계였음을 확인 — 탐색은 3세드 모두 수렴(accuracy 0.84/0.86/0.85), 기준선 대비 에너지 ~10% 절감이라는 트레이드오프도 이 규모에서 재확인됨.
 - **자체 탐색 vs. Optuna 비교 (`tools/optuna_compare.py`)** — 동일한 실제 QAT+physics 파이프라인, 동일한 탐색 공간 구성(`points_to_stage_configs`와 동일한 activation_bits=weight_bits 규약), 동일한 정지 조건(첫 target 충족 후보)으로 이 프로젝트의 서로게이트 기반 NSGA-II 탐색을 잘 알려진 범용 최적화 라이브러리인 Optuna(NSGA-II 샘플러, 서로게이트 없이 실제 평가마다 직접 탐색)와 나란히 비교. 결과: 자체 탐색이 Optuna보다 명확히 우위 — 손으로 만든 acquisition 로직이 제 값을 하고 있음을 실측으로 확인. **형상 인식 물리 모델로 재측정(2026-08-14, 동일 조건 3시드)해도 결론 유지**:
 
   | | 옛 물리 모델 | 새 물리 모델 (재측정) |
