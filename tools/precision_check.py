@@ -19,10 +19,10 @@ A local process without `hwcomponents_neurosim`/`hwcomponents_cacti`
 importable (this project's own Windows dev environment included) can still
 get their real numbers for these rare converged-candidate checks without
 running the whole search/QAT pipeline inside a container: opt into
-`AUTOCIM_PRECISION_BACKEND=docker` (default `local`, same local-first-by-
-default/opt-in-cloud pattern `llm.py`'s `AUTOCIM_PLANNER_MODEL` already
+`TESSELLATE_PRECISION_BACKEND=docker` (default `local`, same local-first-by-
+default/opt-in-cloud pattern `llm.py`'s `TESSELLATE_PLANNER_MODEL` already
 uses) and `simulate_precise_energy` shells out to this project's own Docker
-image (`docker build -t autocim-agent .`) via `_call_docker_precision_bridge`
+image (`docker build -t tessellate .`) via `_call_docker_precision_bridge`
 for just this one computation. Never required and never blocking: any
 failure (Docker not installed, the image missing, the daemon not running, a
 timeout) silently falls back to this module's own local per-term real/
@@ -357,11 +357,11 @@ def _real_sram_buffer_energy_fj(hw: HWConfig) -> Optional[float]:
     return sram.write().energy * 1e15 * n_accesses  # joules -> femtojoules, scaled to the whole buffer
 
 
-_PRECISION_BACKEND_ENV_VAR = "AUTOCIM_PRECISION_BACKEND"
-_DOCKER_IMAGE_ENV_VAR = "AUTOCIM_PRECISION_DOCKER_IMAGE"
-_DEFAULT_DOCKER_IMAGE = "autocim-agent"
-_DOCKER_CONTAINER_ENV_VAR = "AUTOCIM_PRECISION_DOCKER_CONTAINER"
-_DEFAULT_DOCKER_CONTAINER = "autocim-precision-bridge"
+_PRECISION_BACKEND_ENV_VAR = "TESSELLATE_PRECISION_BACKEND"
+_DOCKER_IMAGE_ENV_VAR = "TESSELLATE_PRECISION_DOCKER_IMAGE"
+_DEFAULT_DOCKER_IMAGE = "tessellate"
+_DOCKER_CONTAINER_ENV_VAR = "TESSELLATE_PRECISION_DOCKER_CONTAINER"
+_DEFAULT_DOCKER_CONTAINER = "tessellate-precision-bridge"
 # precision_check_tool (tools/simulators.py) only runs for the rare
 # candidates @evaluator already judged converged, never the search hot
 # path (see this module's docstring) -- a call every few minutes at most,
@@ -386,7 +386,7 @@ def _ensure_docker_container_running(image: str, container: str) -> bool:
     invocation is independent), so leaving it running between separate
     `python main.py` processes is intentional, not a leak -- reuse across
     back-to-back sessions is exactly the point; `docker stop/rm
-    autocim-precision-bridge` (or the `AUTOCIM_PRECISION_DOCKER_CONTAINER`
+    tessellate-precision-bridge` (or the `TESSELLATE_PRECISION_DOCKER_CONTAINER`
     override name) cleans it up manually when no longer wanted.
 
     Returns `False` on any failure (docker missing, daemon down, a
@@ -425,11 +425,11 @@ def _call_docker_precision_bridge(
     layer_configs: List[LayerBitConfig],
     stage_weight_shapes: Optional[Dict[str, List[Tuple[int, int, int]]]] = None,
 ) -> Optional[Dict[str, float]]:
-    """Opt-in (`AUTOCIM_PRECISION_BACKEND=docker`, default `local`, same
+    """Opt-in (`TESSELLATE_PRECISION_BACKEND=docker`, default `local`, same
     local-first-by-default/opt-in-cloud pattern `llm.py`'s
-    `AUTOCIM_PLANNER_MODEL` already uses) escape hatch for running this
+    `TESSELLATE_PLANNER_MODEL` already uses) escape hatch for running this
     module's real computation inside the project's own Docker image
-    (`docker build -t autocim-agent .`, `AUTOCIM_PRECISION_DOCKER_IMAGE` to
+    (`docker build -t tessellate .`, `TESSELLATE_PRECISION_DOCKER_IMAGE` to
     override the tag) when the *local* process doesn't have
     `hwcomponents_neurosim`/`hwcomponents_cacti` importable -- e.g. this
     project's own Windows dev environment (no C++ toolchain, POSIX-only
@@ -554,7 +554,7 @@ def simulate_precise_energy(
     (see that function and `tools.calibration.compute_calibration_factor`
     for why buffer energy is excluded from calibration).
 
-    When `AUTOCIM_PRECISION_BACKEND=docker` and this process doesn't already
+    When `TESSELLATE_PRECISION_BACKEND=docker` and this process doesn't already
     have `hwcomponents_neurosim`/`hwcomponents_cacti` importable, tries
     `_call_docker_precision_bridge` first and returns its result verbatim if
     it succeeds -- already running inside a container with both real
