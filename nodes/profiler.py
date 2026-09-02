@@ -20,11 +20,11 @@ from typing import Any, Dict
 
 from middleware import set_execution_context
 from nodes.common import build_execution_context
-from state import AutoCIMState
+from state import TessellateState
 from tools.simulators import profiler_tool
 
 
-def profiler_node(state: AutoCIMState) -> Dict[str, Any]:
+def profiler_node(state: TessellateState) -> Dict[str, Any]:
     set_execution_context(build_execution_context(state))
 
     tuner_data = (state.get("metrics_store", {}).get("tuner") or {}).get("data") or {}
