@@ -23,7 +23,7 @@ from llm import (
 
 
 def test_get_planner_chat_model_defaults_to_local_ollama_when_env_unset(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_PLANNER_MODEL", raising=False)
+    monkeypatch.delenv("TESSELLATE_PLANNER_MODEL", raising=False)
     captured = {}
     monkeypatch.setattr(
         llm, "init_chat_model", lambda model, **kwargs: captured.update(model=model, kwargs=kwargs) or "fake-model"
@@ -36,7 +36,7 @@ def test_get_planner_chat_model_defaults_to_local_ollama_when_env_unset(monkeypa
 
 
 def test_get_planner_chat_model_respects_env_override(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
+    monkeypatch.setenv("TESSELLATE_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
     captured = {}
     monkeypatch.setattr(llm, "init_chat_model", lambda model, **kwargs: captured.update(model=model) or "fake-model")
@@ -47,10 +47,10 @@ def test_get_planner_chat_model_respects_env_override(monkeypatch):
 
 
 def test_resolve_planner_model_falls_back_to_local_when_api_key_missing(monkeypatch):
-    # AUTOCIM_PLANNER_MODEL names a known cloud provider, but its API key
+    # TESSELLATE_PLANNER_MODEL names a known cloud provider, but its API key
     # env var is unset/empty -- most likely .env.example copied into
     # .env.local with the provider filled in and the key left blank.
-    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
+    monkeypatch.setenv("TESSELLATE_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     model, reason = resolve_planner_model()
@@ -61,7 +61,7 @@ def test_resolve_planner_model_falls_back_to_local_when_api_key_missing(monkeypa
 
 
 def test_resolve_planner_model_unset_env_has_no_fallback_reason(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_PLANNER_MODEL", raising=False)
+    monkeypatch.delenv("TESSELLATE_PLANNER_MODEL", raising=False)
     model, reason = resolve_planner_model()
     assert model == "ollama:qwen2.5:7b"
     assert reason is None
@@ -70,14 +70,14 @@ def test_resolve_planner_model_unset_env_has_no_fallback_reason(monkeypatch):
 def test_resolve_planner_model_unknown_provider_passes_through_unchecked(monkeypatch):
     # A provider this project doesn't have a key-env mapping for (e.g. a
     # local/self-hosted backend) is never blocked by this fallback.
-    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "ollama:some-other-model")
+    monkeypatch.setenv("TESSELLATE_PLANNER_MODEL", "ollama:some-other-model")
     model, reason = resolve_planner_model()
     assert model == "ollama:some-other-model"
     assert reason is None
 
 
 def test_get_planner_chat_model_uses_fallback_when_api_key_missing(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "groq:llama-3.3-70b-versatile")
+    monkeypatch.setenv("TESSELLATE_PLANNER_MODEL", "groq:llama-3.3-70b-versatile")
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     captured = {}
     monkeypatch.setattr(llm, "init_chat_model", lambda model, **kwargs: captured.update(model=model) or "fake-model")
@@ -218,8 +218,8 @@ def test_no_usage_metadata_reports_none_rather_than_guessing():
 
 
 def test_estimated_cost_uses_configured_rates_when_present(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_LLM_COST_PER_1K_INPUT_USD", "0.003")
-    monkeypatch.setenv("AUTOCIM_LLM_COST_PER_1K_OUTPUT_USD", "0.015")
+    monkeypatch.setenv("TESSELLATE_LLM_COST_PER_1K_INPUT_USD", "0.003")
+    monkeypatch.setenv("TESSELLATE_LLM_COST_PER_1K_OUTPUT_USD", "0.015")
     model = _FailNTimesThenSucceed(
         [], _FakeResponseWithUsage(usage_metadata={"input_tokens": 1000, "output_tokens": 1000, "total_tokens": 2000})
     )
@@ -230,8 +230,8 @@ def test_estimated_cost_uses_configured_rates_when_present(monkeypatch):
 
 
 def test_estimated_cost_is_none_without_configured_rates(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_LLM_COST_PER_1K_INPUT_USD", raising=False)
-    monkeypatch.delenv("AUTOCIM_LLM_COST_PER_1K_OUTPUT_USD", raising=False)
+    monkeypatch.delenv("TESSELLATE_LLM_COST_PER_1K_INPUT_USD", raising=False)
+    monkeypatch.delenv("TESSELLATE_LLM_COST_PER_1K_OUTPUT_USD", raising=False)
     model = _FailNTimesThenSucceed(
         [], _FakeResponseWithUsage(usage_metadata={"input_tokens": 1000, "output_tokens": 1000, "total_tokens": 2000})
     )
@@ -245,8 +245,8 @@ def test_estimated_cost_is_none_without_configured_rates(monkeypatch):
 
 
 def test_check_budget_never_exceeded_when_unconfigured(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_LLM_MAX_TOTAL_COST_USD", raising=False)
-    monkeypatch.delenv("AUTOCIM_LLM_MAX_TOTAL_TOKENS", raising=False)
+    monkeypatch.delenv("TESSELLATE_LLM_MAX_TOTAL_COST_USD", raising=False)
+    monkeypatch.delenv("TESSELLATE_LLM_MAX_TOTAL_TOKENS", raising=False)
 
     status = check_budget([{"estimated_cost_usd": 999.0, "total_tokens": 999999}])
 
@@ -254,7 +254,7 @@ def test_check_budget_never_exceeded_when_unconfigured(monkeypatch):
 
 
 def test_check_budget_trips_on_cumulative_cost(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_TOTAL_COST_USD", "1.00")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_TOTAL_COST_USD", "1.00")
     usage = [{"estimated_cost_usd": 0.6}, {"estimated_cost_usd": 0.5}]
 
     status = check_budget(usage)
@@ -264,8 +264,8 @@ def test_check_budget_trips_on_cumulative_cost(monkeypatch):
 
 
 def test_check_budget_trips_on_cumulative_tokens(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_LLM_MAX_TOTAL_COST_USD", raising=False)
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_TOTAL_TOKENS", "1000")
+    monkeypatch.delenv("TESSELLATE_LLM_MAX_TOTAL_COST_USD", raising=False)
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_TOTAL_TOKENS", "1000")
     usage = [{"total_tokens": 600}, {"total_tokens": 500}]
 
     status = check_budget(usage)
@@ -275,8 +275,8 @@ def test_check_budget_trips_on_cumulative_tokens(monkeypatch):
 
 
 def test_check_budget_not_exceeded_below_either_cap(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_TOTAL_COST_USD", "10.00")
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_TOTAL_TOKENS", "100000")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_TOTAL_COST_USD", "10.00")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_TOTAL_TOKENS", "100000")
     usage = [{"estimated_cost_usd": 0.1, "total_tokens": 500}]
 
     status = check_budget(usage)
@@ -286,11 +286,11 @@ def test_check_budget_not_exceeded_below_either_cap(monkeypatch):
 
 def test_check_budget_ignores_entries_with_no_cost_data(monkeypatch):
     """A cost cap can't be enforced from entries that never got a real
-    estimated_cost_usd (e.g. AUTOCIM_LLM_COST_PER_1K_* was never
+    estimated_cost_usd (e.g. TESSELLATE_LLM_COST_PER_1K_* was never
     configured) -- those entries must not be silently treated as $0 and
     diluted into a false sense of being under budget forever, but they also
     must not crash the sum."""
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_TOTAL_COST_USD", "0.01")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_TOTAL_COST_USD", "0.01")
     usage = [{"estimated_cost_usd": None, "total_tokens": 100}, {"estimated_cost_usd": 0.02, "total_tokens": 50}]
 
     status = check_budget(usage)
@@ -302,12 +302,12 @@ def test_check_budget_ignores_entries_with_no_cost_data(monkeypatch):
 
 
 def test_get_fallback_chat_model_is_none_when_primary_is_already_local_default(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_PLANNER_MODEL", raising=False)
+    monkeypatch.delenv("TESSELLATE_PLANNER_MODEL", raising=False)
     assert get_fallback_chat_model() is None
 
 
 def test_get_fallback_chat_model_builds_local_default_when_primary_is_a_distinct_provider(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
+    monkeypatch.setenv("TESSELLATE_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
     captured = {}
     monkeypatch.setattr(llm, "init_chat_model", lambda model, **kwargs: captured.update(model=model) or "fake-fallback")
@@ -323,7 +323,7 @@ def test_get_fallback_chat_model_returns_none_instead_of_raising_when_it_cannot_
     a fallback that can't even be constructed (e.g. langchain-ollama not
     installed) must degrade to "no fallback available" rather than take
     down an otherwise-healthy primary provider."""
-    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
+    monkeypatch.setenv("TESSELLATE_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
 
     def _raise(model, **kwargs):
