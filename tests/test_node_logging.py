@@ -16,7 +16,7 @@ from tests.test_evaluator_candidate_history import _metrics
 
 
 def _log_lines(run_id: str):
-    log_dir = Path(os.environ["AUTOCIM_LOG_DIR"])
+    log_dir = Path(os.environ["TESSELLATE_LOG_DIR"])
     path = log_dir / f"{_safe_filename(run_id)}.jsonl"
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
