@@ -44,7 +44,7 @@ from schemas.tools import (
     TunerToolOutput,
     VerifierToolOutput,
 )
-from state import AutoCIMState
+from state import TessellateState
 from tools.search import best_known_candidate, compute_pareto_rank
 from tools.targets import check_targets  # noqa: F401 -- re-exported; see tools/targets.py's docstring
 
@@ -100,7 +100,7 @@ def build_candidate_entry(
     this iteration's numbers are trustworthy.
 
     Takes `history` (the accumulated `candidate_history` to rank against)
-    directly rather than the full `AutoCIMState` -- `tools/batch_warmup.py`
+    directly rather than the full `TessellateState` -- `tools/batch_warmup.py`
     builds entries for candidates that were never part of any graph state,
     just a growing in-memory list, and this keeps that reuse a plain data
     dependency instead of requiring a fake state dict."""
@@ -132,7 +132,7 @@ def build_candidate_entry(
     return candidate
 
 
-def evaluator_node(state: AutoCIMState) -> Dict[str, Any]:
+def evaluator_node(state: TessellateState) -> Dict[str, Any]:
     metrics = state.get("metrics_store", {})
     iteration_count = state.get("iteration_count", 0)
     retry_count = state.get("retry_count", 0)
@@ -291,7 +291,7 @@ def evaluator_node(state: AutoCIMState) -> Dict[str, Any]:
 
 
 def evaluator_router(
-    state: AutoCIMState,
+    state: TessellateState,
 ) -> Literal["Converged (Done)", "Concluded (low confidence)", "HITL Interrupt", "Re-plan with History"]:
     if state.get("is_converged", False):
         # A `search_budget_iterations` run whose budget ran out with nothing
