@@ -1,5 +1,14 @@
 """Real PyTorch QAT engine for @tuner.
 
+The column-wise weight + partial-sum quantization arrangement below is not
+this project's idea: it follows Kim et al., "Column-wise Quantization of
+Weights and Partial Sums for Accurate and Efficient Compute-In-Memory
+Accelerators" (DATE 2025, arXiv:2502.07842). What this file implements is a
+simplification of it -- notably WITHOUT that paper's learnable (LSQ) scale
+factors and without its array-level tiling of partial sums. See
+docs/prior_work.md for exactly what is and is not carried over; do not
+describe this file as an implementation of that paper.
+
 Replaces the earlier accuracy-by-formula mock with genuine PyTorch
 mechanics: real crossbar-aligned fake-quantization (straight-through
 estimator) and real magnitude-ranked structured column pruning, applied to
@@ -22,7 +31,7 @@ uniform quantization rather than erroring.
 Scope, stated plainly:
 - Device-agnostic: `run_qat_tuning` moves its (deep-copied, per-trial)
   model and each batch to `_resolve_device`'s result -- an explicit
-  `AUTOCIM_QAT_DEVICE` override, else auto-detected (CUDA, then Apple
+  `TESSELLATE_QAT_DEVICE` override, else auto-detected (CUDA, then Apple
   MPS, then CPU) -- never hardcoded to assume a GPU exists, since most
   CI/dev machines don't (docs/coding_guidelines.md 5.C). `get_qat_backend`'s cached
   `base_model`/loaders stay on CPU regardless -- only the per-trial deep
@@ -61,9 +70,9 @@ Scope, stated plainly:
   (not the full 50k/10k images), so a QAT trial completes in CPU time by
   default -- an explicit,
   approved scope decision, not a hidden shortcut, and one a deployment can
-  widen (up to the full split) via `AUTOCIM_QAT_TRAIN_SIZE`/`_VAL_SIZE`/
+  widen (up to the full split) via `TESSELLATE_QAT_TRAIN_SIZE`/`_VAL_SIZE`/
   `_TEST_SIZE`/`_BATCH_SIZE`, or train for longer per candidate via
-  `AUTOCIM_QAT_MAX_EPOCHS` (`resolve_max_epochs`, the single source of truth
+  `TESSELLATE_QAT_MAX_EPOCHS` (`resolve_max_epochs`, the single source of truth
   `nodes/tuner.py`/`tools/batch_warmup.py` both call), without a code
   change (docs/coding_guidelines.md 5.C). Whatever
   the configured sizes, `_DEFAULT_TRAIN_SIZE`/`_VAL_SIZE`/`_TEST_SIZE` are a
@@ -315,11 +324,11 @@ def apply_crossbar_quant_prune(
 # Device selection (docs/coding_guidelines.md 5.C: config-driven, never hardcoded)
 # ---------------------------------------------------------------------------
 
-_DEVICE_ENV = "AUTOCIM_QAT_DEVICE"
+_DEVICE_ENV = "TESSELLATE_QAT_DEVICE"
 
 
 def _resolve_device(requested: Optional[str] = None) -> torch.device:
-    """`requested` (or `AUTOCIM_QAT_DEVICE` if `requested` is None) wins
+    """`requested` (or `TESSELLATE_QAT_DEVICE` if `requested` is None) wins
     when set; otherwise auto-detects the best available accelerator --
     CUDA, then Apple's MPS backend, then CPU. Never raises on a machine
     with no GPU (that's the common case: CI, most dev/deployment
@@ -640,21 +649,21 @@ def get_stage_weight_shapes(
 # hardcoded) -- a deployment validating against its *real* target dataset
 # rather than this demo subset had no way to widen scope without editing
 # this file. Now env-var overridable (same pattern as llm.py's
-# AUTOCIM_LLM_* / AUTOCIM_PLANNER_MODEL), defaulting to the values above so
+# TESSELLATE_LLM_* / TESSELLATE_PLANNER_MODEL), defaulting to the values above so
 # nothing changes for a caller that doesn't opt in. `_FULL_SPLIT` lets
-# AUTOCIM_QAT_TRAIN_SIZE/AUTOCIM_QAT_TEST_SIZE request "every image CIFAR10's
+# TESSELLATE_QAT_TRAIN_SIZE/TESSELLATE_QAT_TEST_SIZE request "every image CIFAR10's
 # own split has" without hand-computing 50000/10000 -- resolved against the
 # actual loaded dataset length in `_build_cifar10_loaders`, not guessed here.
 # Widening these multiplies real per-trial wall-clock -- much less severely
 # on a machine `_resolve_device` finds a GPU on than on CPU (see this
 # module's docstring), but still the caller's tradeoff to make, not
 # silently defaulted for them.
-_TRAIN_SIZE_ENV = "AUTOCIM_QAT_TRAIN_SIZE"
-_VAL_SIZE_ENV = "AUTOCIM_QAT_VAL_SIZE"
-_TEST_SIZE_ENV = "AUTOCIM_QAT_TEST_SIZE"
-_BATCH_SIZE_ENV = "AUTOCIM_QAT_BATCH_SIZE"
-_SEED_ENV = "AUTOCIM_QAT_SEED"
-_MAX_EPOCHS_ENV = "AUTOCIM_QAT_MAX_EPOCHS"
+_TRAIN_SIZE_ENV = "TESSELLATE_QAT_TRAIN_SIZE"
+_VAL_SIZE_ENV = "TESSELLATE_QAT_VAL_SIZE"
+_TEST_SIZE_ENV = "TESSELLATE_QAT_TEST_SIZE"
+_BATCH_SIZE_ENV = "TESSELLATE_QAT_BATCH_SIZE"
+_SEED_ENV = "TESSELLATE_QAT_SEED"
+_MAX_EPOCHS_ENV = "TESSELLATE_QAT_MAX_EPOCHS"
 
 _DEFAULT_TRAIN_SIZE = 512
 _DEFAULT_VAL_SIZE = 128
@@ -691,8 +700,8 @@ def _resolve_int_env(env_var: str, default: int) -> int:
 
 
 def resolve_max_epochs() -> int:
-    """`AUTOCIM_QAT_MAX_EPOCHS` (same env-var-overridable pattern as
-    `AUTOCIM_QAT_TRAIN_SIZE`/etc. above), defaulting to `_DEFAULT_MAX_EPOCHS`
+    """`TESSELLATE_QAT_MAX_EPOCHS` (same env-var-overridable pattern as
+    `TESSELLATE_QAT_TRAIN_SIZE`/etc. above), defaulting to `_DEFAULT_MAX_EPOCHS`
     -- the single source of truth `nodes/tuner.py` and
     `tools/batch_warmup.py` both call instead of each keeping their own
     hardcoded `_DEFAULT_MAX_EPOCHS` constant "in lockstep" (a real
@@ -701,7 +710,7 @@ def resolve_max_epochs() -> int:
     sequential graph loop and the parallel warm-up batch train real
     candidates for different numbers of epochs without either caller
     knowing). Widening this multiplies every real QAT trial's wall-clock
-    linearly -- the same caller's tradeoff to make as `AUTOCIM_QAT_TRAIN_SIZE`,
+    linearly -- the same caller's tradeoff to make as `TESSELLATE_QAT_TRAIN_SIZE`,
     not silently defaulted for them."""
     return _resolve_int_env(_MAX_EPOCHS_ENV, _DEFAULT_MAX_EPOCHS)
 
@@ -782,7 +791,7 @@ _DEFAULT_DATASET_ID = "cifar10"
 
 def _load_cifar10() -> Tuple[DataLoader, DataLoader, DataLoader, int]:
     """The built-in `"cifar10"` dataset loader -- same env-var-driven
-    sizing as always (`AUTOCIM_QAT_*`, resolved at call time so
+    sizing as always (`TESSELLATE_QAT_*`, resolved at call time so
     `monkeypatch.setenv` before the first call still takes effect), now
     behind the same zero-argument `DatasetLoader` contract every custom
     dataset (`register_dataset`/a `"module:function"` spec) follows."""
