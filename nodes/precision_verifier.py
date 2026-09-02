@@ -20,11 +20,11 @@ from middleware import set_execution_context
 from nodes.common import build_execution_context, run_id_for
 from nodes.evaluator import MAX_RETRY_LIMIT
 from observability import log_event
-from state import AutoCIMState
+from state import TessellateState
 from tools.simulators import precision_check_tool
 
 
-def precision_verifier_node(state: AutoCIMState) -> Dict[str, Any]:
+def precision_verifier_node(state: TessellateState) -> Dict[str, Any]:
     set_execution_context(build_execution_context(state))
 
     iteration_count = state.get("iteration_count", 0)
