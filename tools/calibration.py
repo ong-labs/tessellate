@@ -9,7 +9,7 @@ over time. This module is the first real feed into that loop: `KNOWN_REFERENCES`
 holds actual published data points; `bootstrap_calibration_factors` computes
 a per-hw_spec_id correction factor (real reference energy / this model's
 predicted energy for the matching config) and seeds
-`AutoCIMState.calibration_factors` with it (main.py) so @profiler's output
+`TessellateState.calibration_factors` with it (main.py) so @profiler's output
 is corrected against real data from the first iteration, for any HWConfig
 whose (crossbar_rows, crossbar_cols, adc_bits) exactly matches a known
 reference -- and, for the rare case where two references share that same
@@ -522,7 +522,7 @@ def bootstrap_calibration_factors(hw: HWConfig) -> Dict[str, float]:
     """`{}` if no known reference exactly matches `hw` -- the honest
     default (stays uncalibrated) rather than guessing. Otherwise
     `{hw.hw_spec_id: factor}`, ready to seed
-    `AutoCIMState.calibration_factors` (main.py's `build_initial_state`)."""
+    `TessellateState.calibration_factors` (main.py's `build_initial_state`)."""
     reference = find_matching_reference(hw)
     if reference is None:
         return {}
@@ -533,7 +533,7 @@ def describe_calibration(hw: HWConfig) -> Optional[Dict[str, Any]]:
     """The matching reference's citation/uncertainty, as a plain dict --
     `None` if `hw` is uncalibrated. Kept separate from
     `bootstrap_calibration_factors` (rather than folding this into that
-    function's return value) so `AutoCIMState.calibration_factors` stays
+    function's return value) so `TessellateState.calibration_factors` stays
     the simple `{hw_spec_id: float}` shape `tools/simulators.py`'s
     `profiler_tool` already multiplies by -- this is purely additive
     metadata for `tools/dashboard.py` to display, not part of the
@@ -551,7 +551,7 @@ def describe_calibration(hw: HWConfig) -> Optional[Dict[str, Any]]:
 def bootstrap_calibration_provenance(hw: HWConfig) -> Dict[str, Dict[str, Any]]:
     """`{}` if uncalibrated, else `{hw.hw_spec_id: describe_calibration(hw)}`
     -- the provenance analogue of `bootstrap_calibration_factors`, seeded
-    into `AutoCIMState.calibration_provenance` by the same caller
+    into `TessellateState.calibration_provenance` by the same caller
     (main.py's `build_initial_state`)."""
     described = describe_calibration(hw)
     if described is None:
