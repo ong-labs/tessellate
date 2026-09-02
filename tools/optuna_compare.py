@@ -1,4 +1,4 @@
-"""Compares AutoCIM-Agent's own search acquisition (tools/search.py's
+"""Compares Tessellate's own search acquisition (tools/search.py's
 NSGA-II over an IDW surrogate, the "multi_objective" strategy) against
 Optuna (a well-established, widely-used general-purpose hyperparameter
 optimization library) running the identical real QAT + physics evaluation
