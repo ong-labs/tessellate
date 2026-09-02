@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for AutoCIM-Agent's test suite."""
+"""Shared pytest fixtures for Tessellate's test suite."""
 
 from typing import Any, Callable, Dict, List, Optional
 
@@ -13,7 +13,7 @@ import observability
 import tools.simulators as simulators_module
 from middleware import register_hw_config
 from schemas.config import HWConfig, NoCTopology
-from state import AutoCIMState
+from state import TessellateState
 from tools.qat import QATBackend
 
 GOOD_HW_SPEC_ID = "test_hw_good"
@@ -22,14 +22,14 @@ BAD_HW_SPEC_ID = "test_hw_bad"
 
 @pytest.fixture(autouse=True)
 def isolated_observability_log_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    """Every test gets its own AUTOCIM_LOG_DIR (observability.py) -- without
+    """Every test gets its own TESSELLATE_LOG_DIR (observability.py) -- without
     this, structured-logging events from every test in this suite would
     write into the real repo's `.cache/logs/`, and `observability.py`'s
     per-run-id logger cache would keep a stale `FileHandler` pointing at a
     previous test's tmp_path once one exists. `reset_loggers()` clears that
     cache both before (fresh dir takes effect) and after (no leaked open
     file handles into the next test)."""
-    monkeypatch.setenv("AUTOCIM_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setenv("TESSELLATE_LOG_DIR", str(tmp_path / "logs"))
     observability.reset_loggers()
     yield
     observability.reset_loggers()
@@ -47,9 +47,9 @@ def isolated_long_term_store(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setattr(main, "DEFAULT_LONG_TERM_STORE_DB", tmp_path / "long_term_store.sqlite")
 
 
-def make_state(**overrides: Any) -> AutoCIMState:
-    """Build a minimal, valid AutoCIMState, overriding any field by keyword."""
-    state: AutoCIMState = {
+def make_state(**overrides: Any) -> TessellateState:
+    """Build a minimal, valid TessellateState, overriding any field by keyword."""
+    state: TessellateState = {
         "messages": [],
         "failure_history": [],
         "candidate_history": [],
@@ -80,7 +80,7 @@ def make_state(**overrides: Any) -> AutoCIMState:
 
 
 @pytest.fixture
-def state_factory() -> Callable[..., AutoCIMState]:
+def state_factory() -> Callable[..., TessellateState]:
     return make_state
 
 
