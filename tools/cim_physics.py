@@ -24,7 +24,7 @@ device-physics and NoC-architecture scaling relationships:
 
 `CIM_TECH_PARAMS` are representative order-of-magnitude reference values,
 not silicon-measured numbers for any specific process node -- this is
-exactly why `AutoCIMState.calibration_factors` exists (Research_Plan.md 3):
+exactly why `TessellateState.calibration_factors` exists (Research_Plan.md 3):
 these are a *fast approximation*, meant to be scaled by a per-hw_spec_id
 factor learned against precise simulation over time (applied in
 tools/simulators.py's profiler_tool, to `compute_energy_pj` only), not
