@@ -1,4 +1,4 @@
-"""Configuration schemas for AutoCIM-Agent.
+"""Configuration schemas for Tessellate.
 
 Hardware constraints and run-scoped identifiers live here. Node/tool logic
 must load these values through `HWConfig`/`ExecutionContext` instances
