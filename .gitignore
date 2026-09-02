@@ -74,3 +74,6 @@ notebooks/demo_dashboard.html
 # The run README says where the local copy lives; the terminal log,
 # events.jsonl and the generated report are what is actually kept.
 runs/**/checkpoints.sqlite
+
+# Agent instructions -- local only
+docs/coding_guidelines.md
