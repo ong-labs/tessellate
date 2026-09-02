@@ -120,9 +120,9 @@ def test_planner_switches_to_fallback_provider_when_primary_keeps_failing(monkey
         {"rationale": "fallback provider decision", "rationale_ko": "폴백 provider 결정", "anomaly_note": None}
     )
 
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_RETRIES", "2")
-    monkeypatch.setenv("AUTOCIM_LLM_BASE_DELAY_SECONDS", "0.001")
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_DELAY_SECONDS", "0.001")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_RETRIES", "2")
+    monkeypatch.setenv("TESSELLATE_LLM_BASE_DELAY_SECONDS", "0.001")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_DELAY_SECONDS", "0.001")
     monkeypatch.setattr(planner_module, "get_planner_chat_model", lambda: _AlwaysRateLimited())
     monkeypatch.setattr(planner_module, "get_fallback_chat_model", lambda: fallback)
 
@@ -153,9 +153,9 @@ def test_planner_falls_back_to_search_point_when_both_providers_fail(monkeypatch
         def invoke(self, messages):
             raise RuntimeError("connection refused")
 
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_RETRIES", "1")
-    monkeypatch.setenv("AUTOCIM_LLM_BASE_DELAY_SECONDS", "0.001")
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_DELAY_SECONDS", "0.001")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_RETRIES", "1")
+    monkeypatch.setenv("TESSELLATE_LLM_BASE_DELAY_SECONDS", "0.001")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_DELAY_SECONDS", "0.001")
     monkeypatch.setattr(planner_module, "get_planner_chat_model", lambda: _AlwaysRateLimited())
     monkeypatch.setattr(planner_module, "get_fallback_chat_model", lambda: _AlwaysConnectionRefused())
 
@@ -193,9 +193,9 @@ def test_planner_records_llm_usage_on_retry_exhaustion(monkeypatch, state_factor
         def invoke(self, messages):
             raise RuntimeError("429 rate limit exceeded")
 
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_RETRIES", "2")
-    monkeypatch.setenv("AUTOCIM_LLM_BASE_DELAY_SECONDS", "0.001")
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_DELAY_SECONDS", "0.001")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_RETRIES", "2")
+    monkeypatch.setenv("TESSELLATE_LLM_BASE_DELAY_SECONDS", "0.001")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_DELAY_SECONDS", "0.001")
     monkeypatch.setattr(planner_module, "get_planner_chat_model", lambda: _AlwaysRateLimited())
 
     state = state_factory()
@@ -204,7 +204,7 @@ def test_planner_records_llm_usage_on_retry_exhaustion(monkeypatch, state_factor
     assert len(update["llm_usage"]) == 1
     entry = update["llm_usage"][0]
     assert entry["succeeded"] is False
-    assert entry["attempts"] == 2  # retried up to AUTOCIM_LLM_MAX_RETRIES, not just given up on the first failure
+    assert entry["attempts"] == 2  # retried up to TESSELLATE_LLM_MAX_RETRIES, not just given up on the first failure
     assert "429" in entry["error"]
     assert any("LLM proposal failed after 2 attempt(s)" in m["content"] for m in update["messages"])
     # Still falls back to a valid planned config, exactly like the
@@ -213,7 +213,7 @@ def test_planner_records_llm_usage_on_retry_exhaustion(monkeypatch, state_factor
 
 
 def test_planner_skips_llm_call_entirely_once_budget_is_exceeded(monkeypatch, state_factory, fake_planner_chat_model):
-    monkeypatch.setenv("AUTOCIM_LLM_MAX_TOTAL_COST_USD", "1.00")
+    monkeypatch.setenv("TESSELLATE_LLM_MAX_TOTAL_COST_USD", "1.00")
     state = state_factory(llm_usage=[{"estimated_cost_usd": 1.50, "total_tokens": 100}])
 
     update = planner_node(state)
