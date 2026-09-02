@@ -394,56 +394,56 @@ def test_run_qat_tuning_without_seed_does_not_touch_global_rng_determinism(fake_
     assert torch.equal(after_first, after_second)
 
 
-# --- Configurable QAT dataset scope (AUTOCIM_QAT_*) -------------------------
+# --- Configurable QAT dataset scope (TESSELLATE_QAT_*) -------------------------
 
 
 def test_resolve_size_env_returns_default_when_unset(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_QAT_TRAIN_SIZE", raising=False)
-    assert _resolve_size_env("AUTOCIM_QAT_TRAIN_SIZE", 512, allow_full=True) == 512
+    monkeypatch.delenv("TESSELLATE_QAT_TRAIN_SIZE", raising=False)
+    assert _resolve_size_env("TESSELLATE_QAT_TRAIN_SIZE", 512, allow_full=True) == 512
 
 
 def test_resolve_size_env_parses_a_configured_integer(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_TRAIN_SIZE", "2000")
-    assert _resolve_size_env("AUTOCIM_QAT_TRAIN_SIZE", 512, allow_full=True) == 2000
+    monkeypatch.setenv("TESSELLATE_QAT_TRAIN_SIZE", "2000")
+    assert _resolve_size_env("TESSELLATE_QAT_TRAIN_SIZE", 512, allow_full=True) == 2000
 
 
 def test_resolve_size_env_recognizes_full_sentinel_case_insensitively(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_TRAIN_SIZE", "FULL")
-    assert _resolve_size_env("AUTOCIM_QAT_TRAIN_SIZE", 512, allow_full=True) == "full"
+    monkeypatch.setenv("TESSELLATE_QAT_TRAIN_SIZE", "FULL")
+    assert _resolve_size_env("TESSELLATE_QAT_TRAIN_SIZE", 512, allow_full=True) == "full"
 
 
 def test_resolve_size_env_falls_back_to_default_on_garbage_value(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_TRAIN_SIZE", "not-a-number")
-    assert _resolve_size_env("AUTOCIM_QAT_TRAIN_SIZE", 512, allow_full=True) == 512
+    monkeypatch.setenv("TESSELLATE_QAT_TRAIN_SIZE", "not-a-number")
+    assert _resolve_size_env("TESSELLATE_QAT_TRAIN_SIZE", 512, allow_full=True) == 512
 
 
 def test_resolve_size_env_falls_back_to_default_on_non_positive_value(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_TRAIN_SIZE", "0")
-    assert _resolve_size_env("AUTOCIM_QAT_TRAIN_SIZE", 512, allow_full=True) == 512
+    monkeypatch.setenv("TESSELLATE_QAT_TRAIN_SIZE", "0")
+    assert _resolve_size_env("TESSELLATE_QAT_TRAIN_SIZE", 512, allow_full=True) == 512
 
 
 def test_resolve_int_env_returns_default_when_unset(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_QAT_BATCH_SIZE", raising=False)
-    assert _resolve_int_env("AUTOCIM_QAT_BATCH_SIZE", 32) == 32
+    monkeypatch.delenv("TESSELLATE_QAT_BATCH_SIZE", raising=False)
+    assert _resolve_int_env("TESSELLATE_QAT_BATCH_SIZE", 32) == 32
 
 
 def test_resolve_int_env_parses_a_configured_value(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_BATCH_SIZE", "64")
-    assert _resolve_int_env("AUTOCIM_QAT_BATCH_SIZE", 32) == 64
+    monkeypatch.setenv("TESSELLATE_QAT_BATCH_SIZE", "64")
+    assert _resolve_int_env("TESSELLATE_QAT_BATCH_SIZE", 32) == 64
 
 
 def test_resolve_max_epochs_returns_default_when_unset(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_QAT_MAX_EPOCHS", raising=False)
+    monkeypatch.delenv("TESSELLATE_QAT_MAX_EPOCHS", raising=False)
     assert resolve_max_epochs() == 5
 
 
 def test_resolve_max_epochs_parses_a_configured_value(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_MAX_EPOCHS", "15")
+    monkeypatch.setenv("TESSELLATE_QAT_MAX_EPOCHS", "15")
     assert resolve_max_epochs() == 15
 
 
 def test_resolve_max_epochs_falls_back_to_default_on_garbage_value(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_MAX_EPOCHS", "not-a-number")
+    monkeypatch.setenv("TESSELLATE_QAT_MAX_EPOCHS", "not-a-number")
     assert resolve_max_epochs() == 5
 
 
@@ -472,7 +472,7 @@ def test_resolve_split_sizes_raises_when_test_exceeds_available():
         _resolve_split_sizes(50, 20, 200, train_available=100, test_available=100)
 
 
-# --- Device selection (AUTOCIM_QAT_DEVICE) -----------------------------------
+# --- Device selection (TESSELLATE_QAT_DEVICE) -----------------------------------
 
 
 def test_resolve_device_explicit_argument_wins_over_everything():
@@ -480,17 +480,17 @@ def test_resolve_device_explicit_argument_wins_over_everything():
 
 
 def test_resolve_device_env_var_used_when_no_explicit_argument(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_DEVICE", "cpu")
+    monkeypatch.setenv("TESSELLATE_QAT_DEVICE", "cpu")
     assert _resolve_device(None) == torch.device("cpu")
 
 
 def test_resolve_device_explicit_argument_beats_env_var(monkeypatch):
-    monkeypatch.setenv("AUTOCIM_QAT_DEVICE", "cpu")
+    monkeypatch.setenv("TESSELLATE_QAT_DEVICE", "cpu")
     assert _resolve_device("meta") == torch.device("meta")
 
 
 def test_resolve_device_auto_detects_a_real_device_when_unconfigured(monkeypatch):
-    monkeypatch.delenv("AUTOCIM_QAT_DEVICE", raising=False)
+    monkeypatch.delenv("TESSELLATE_QAT_DEVICE", raising=False)
     resolved = _resolve_device(None)
     # Whatever this machine actually has (GPU or not), _resolve_device must
     # agree with torch's own capability checks -- not silently assume one
