@@ -1,6 +1,6 @@
 """tools/dashboard.py: joins candidate_history (what happened) against
 planner_decisions (why it was tried) and llm_usage (real LLM cost) into a
-self-contained HTML report -- a pure function of AutoCIMState, no I/O, so
+self-contained HTML report -- a pure function of TessellateState, no I/O, so
 tested purely against synthetic state (state_factory), no real graph run."""
 
 import re
@@ -78,7 +78,7 @@ def test_render_dashboard_html_includes_pareto_chart_points_per_iteration(state_
 
 def test_render_dashboard_html_reports_llm_call_counts(state_factory):
     """No cost figure is shown -- this project targets local LLMs, where
-    there's no per-call billing to estimate (AUTOCIM_LLM_COST_PER_1K_* is
+    there's no per-call billing to estimate (TESSELLATE_LLM_COST_PER_1K_* is
     for the rare paid-API case and isn't surfaced on the dashboard)."""
     usage = [
         {"node": "planner", "iteration": 1, "attempts": 1, "succeeded": True, "estimated_cost_usd": 0.02},
