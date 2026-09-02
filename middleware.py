@@ -1,4 +1,4 @@
-"""Tool interceptor and context-management middleware for AutoCIM-Agent.
+"""Tool interceptor and context-management middleware for Tessellate.
 
 Two independent concerns live here (docs/coding_guidelines.md 5.D):
 
@@ -47,7 +47,7 @@ InputT = TypeVar("InputT", bound=BaseModel)
 # =============================================================================
 
 _execution_context_var: contextvars.ContextVar[Optional[ExecutionContext]] = contextvars.ContextVar(
-    "autocim_execution_context", default=None
+    "tessellate_execution_context", default=None
 )
 _hw_config_registry: Dict[str, HWConfig] = {}
 
@@ -92,7 +92,7 @@ def wrap_tool_call(
     instance and return a `ToolResult` (or subclass) instance. The
     decorated callable instead accepts raw kwargs (as an LLM tool-calling
     layer would supply) and always returns `{node_name: ToolResult_dict}`,
-    ready to merge into `AutoCIMState.metrics_store` via
+    ready to merge into `TessellateState.metrics_store` via
     `namespaced_metrics_reducer` (state.py).
     """
 
@@ -136,7 +136,7 @@ def wrap_tool_call(
                 )
 
             # mode="json" so enums (e.g. ToolStatus) land in metrics_store as
-            # plain strings -- AutoCIMState gets checkpointed (MemorySaver
+            # plain strings -- TessellateState gets checkpointed (MemorySaver
             # etc.), and a live Enum instance in a Pydantic-model dump is not
             # msgpack/JSON-safe by default.
             return {node_name: result.model_dump(mode="json")}
@@ -151,7 +151,7 @@ def wrap_tool_call(
 # 2. Context Pruning / Summarization -- bound what's fed to the LLM
 # =============================================================================
 #
-# NOTE: AutoCIMState["messages"] uses an append-only `operator.add` reducer
+# NOTE: TessellateState["messages"] uses an append-only `operator.add` reducer
 # (state.py), so a graph node cannot shrink it by returning a smaller list --
 # that would only ever grow it. These helpers therefore operate as a
 # *read-time* view: called right before building the next LLM prompt, not
@@ -214,7 +214,7 @@ def summarize_tool_result_for_messages(
     node_name: str, result: Dict[str, Any], max_chars: int = 500
 ) -> Dict[str, Any]:
     """Compact, token-bounded version of a tool result for appending to
-    `messages`. `AutoCIMState.metrics_store` keeps the full-precision
+    `messages`. `TessellateState.metrics_store` keeps the full-precision
     result separately for downstream numeric logic (@evaluator etc.) --
     this pruning only affects what the LLM sees."""
     error = result.get("error")
