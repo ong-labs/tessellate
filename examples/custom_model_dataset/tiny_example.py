@@ -1,6 +1,6 @@
 """Example custom --model-id/--dataset-id target (docs/coding_guidelines.md 5.C "Model
 Agnostic"): proves a user's own architecture/dataset plugs into
-AutoCIM-Agent with zero changes to this repo, via tools/qat.py's
+Tessellate with zero changes to this repo, via tools/qat.py's
 "module.path:function_name" spec.
 
 Run against these two (no download, CPU-fast, real gradient descent on
