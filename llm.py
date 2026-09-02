@@ -1,11 +1,11 @@
-"""Chat-model factory + call-operations for AutoCIM-Agent's LLM-backed nodes.
+"""Chat-model factory + call-operations for Tessellate's LLM-backed nodes.
 
 Provider/model choice is config-driven, mirroring docs/coding_guidelines.md 5.C's "load
 hardware specs via HWConfig, never hardcode" principle at the LLM boundary:
 defaults to a local Ollama model (_DEFAULT_LOCAL_MODEL) so a fresh checkout
 never has to send hardware specs or candidate configs to a cloud API just to
 run -- IP-sensitive deployments (chip vendors) get that off-network guarantee
-for free. Set AUTOCIM_PLANNER_MODEL to any other "<provider>:<model>" string
+for free. Set TESSELLATE_PLANNER_MODEL to any other "<provider>:<model>" string
 `langchain.chat_models.init_chat_model` accepts (e.g.
 "anthropic:claude-sonnet-4-5-20250929" or "openai:gpt-4.1") to opt into a
 cloud provider instead -- a provider swap is still just an env var change,
@@ -28,7 +28,7 @@ retry. It:
 - returns an `LLMCallRecord` alongside the response (or raises
   `LLMCallFailed`, which carries one) recording attempts, latency, and --
   when the underlying provider's response exposes it -- real token counts,
-  so `AutoCIMState.llm_usage` (state.py) can accumulate real per-iteration
+  so `TessellateState.llm_usage` (state.py) can accumulate real per-iteration
   LLM cost/attempt data across a run instead of that information only
   existing in provider-side logs.
 
@@ -39,7 +39,7 @@ indefinitely across `@evaluator`'s re-plan loop. It never talks to a
 provider itself -- `nodes/planner.py` calls it *before* attempting an LLM
 call each iteration and skips the call entirely (falling back to the
 search-point suggestion, same as any other LLM failure) once a configured
-`AUTOCIM_LLM_MAX_TOTAL_COST_USD`/`AUTOCIM_LLM_MAX_TOTAL_TOKENS` budget for
+`TESSELLATE_LLM_MAX_TOTAL_COST_USD`/`TESSELLATE_LLM_MAX_TOTAL_TOKENS` budget for
 the run is spent.
 
 `get_fallback_chat_model`/`invoke_with_retry_and_fallback` add one more
@@ -68,10 +68,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 
-_MODEL_ENV_VAR = "AUTOCIM_PLANNER_MODEL"
+_MODEL_ENV_VAR = "TESSELLATE_PLANNER_MODEL"
 # Local, tool-calling-verified default -- keeps hardware specs/candidate
 # configs off any network by default. Requires `ollama serve` running with
-# this model pulled (`ollama pull qwen2.5:7b`); set AUTOCIM_PLANNER_MODEL to
+# this model pulled (`ollama pull qwen2.5:7b`); set TESSELLATE_PLANNER_MODEL to
 # override with a cloud provider spec instead.
 _DEFAULT_LOCAL_MODEL = "ollama:qwen2.5:7b"
 
@@ -91,10 +91,10 @@ _PROVIDER_API_KEY_ENV = {
 def resolve_planner_model() -> Tuple[str, Optional[str]]:
     """The `<provider>:<model>` string `get_planner_chat_model()` will
     actually use, plus a one-line reason string when it differs from a
-    plain `AUTOCIM_PLANNER_MODEL` passthrough (None otherwise) -- split out
+    plain `TESSELLATE_PLANNER_MODEL` passthrough (None otherwise) -- split out
     from `get_planner_chat_model()` so main.py can print this at session
     start without constructing a real chat model just to know what it'll
-    be. AUTOCIM_PLANNER_MODEL set to a cloud provider this project knows
+    be. TESSELLATE_PLANNER_MODEL set to a cloud provider this project knows
     the API key env var for, but that env var is empty/unset, falls back
     to the local default instead of letting init_chat_model() fail deep
     inside a run -- most likely cause is `.env.example` copied into
@@ -148,22 +148,22 @@ def get_fallback_chat_model() -> Optional[BaseChatModel]:
 # Operational policy constants, not hardware specs (docs/coding_guidelines.md 5.C only
 # prohibits hardcoding hardware numbers) -- still env-overridable so a
 # deployment can tune retry/backoff without a code change, same spirit as
-# AUTOCIM_PLANNER_MODEL above.
-_MAX_RETRIES_ENV = "AUTOCIM_LLM_MAX_RETRIES"
-_BASE_DELAY_ENV = "AUTOCIM_LLM_BASE_DELAY_SECONDS"
-_MAX_DELAY_ENV = "AUTOCIM_LLM_MAX_DELAY_SECONDS"
+# TESSELLATE_PLANNER_MODEL above.
+_MAX_RETRIES_ENV = "TESSELLATE_LLM_MAX_RETRIES"
+_BASE_DELAY_ENV = "TESSELLATE_LLM_BASE_DELAY_SECONDS"
+_MAX_DELAY_ENV = "TESSELLATE_LLM_MAX_DELAY_SECONDS"
 # $/1K-token rates: no default -- provider pricing changes and varies per
 # model, so guessing one here would silently report a fabricated cost.
 # Real token *counts* (see LLMCallRecord) are always reported when the
 # provider exposes them; cost is only ever computed from these if a
 # deployment explicitly configures its own current rate.
-_COST_PER_1K_INPUT_ENV = "AUTOCIM_LLM_COST_PER_1K_INPUT_USD"
-_COST_PER_1K_OUTPUT_ENV = "AUTOCIM_LLM_COST_PER_1K_OUTPUT_USD"
+_COST_PER_1K_INPUT_ENV = "TESSELLATE_LLM_COST_PER_1K_INPUT_USD"
+_COST_PER_1K_OUTPUT_ENV = "TESSELLATE_LLM_COST_PER_1K_OUTPUT_USD"
 # Per-run budget caps (see `check_budget` below) -- unset by default (no
 # cap), since a hardcoded default here would silently throttle a
 # deployment that never asked for one.
-_MAX_TOTAL_COST_ENV = "AUTOCIM_LLM_MAX_TOTAL_COST_USD"
-_MAX_TOTAL_TOKENS_ENV = "AUTOCIM_LLM_MAX_TOTAL_TOKENS"
+_MAX_TOTAL_COST_ENV = "TESSELLATE_LLM_MAX_TOTAL_COST_USD"
+_MAX_TOTAL_TOKENS_ENV = "TESSELLATE_LLM_MAX_TOTAL_TOKENS"
 
 _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_BASE_DELAY_SECONDS = 1.0
@@ -194,7 +194,7 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 @dataclass
 class LLMCallRecord:
     """One real LLM call's operational stats -- appended to
-    `AutoCIMState.llm_usage` (state.py) so cost/attempts/latency accumulate
+    `TessellateState.llm_usage` (state.py) so cost/attempts/latency accumulate
     across a run instead of only existing in provider-side logs."""
 
     node: str
@@ -245,7 +245,7 @@ def _status_code_of(exc: Exception) -> Optional[int]:
     """Best-effort status code from whatever shape the underlying provider
     SDK / langchain wrapper used -- checked defensively (no hard dependency
     on any one provider's exception classes) since this project supports
-    swapping AUTOCIM_PLANNER_MODEL across providers (llm.py's own
+    swapping TESSELLATE_PLANNER_MODEL across providers (llm.py's own
     docstring)."""
     for attr in ("status_code", "code"):
         value = getattr(exc, attr, None)
@@ -369,10 +369,10 @@ class BudgetStatus:
 
 
 def check_budget(llm_usage: Sequence[Dict[str, Any]]) -> BudgetStatus:
-    """Sums `llm_usage` (`AutoCIMState.llm_usage`, state.py -- one entry per
-    past LLM call this run) against whichever of `AUTOCIM_LLM_MAX_TOTAL_COST_USD`/
-    `AUTOCIM_LLM_MAX_TOTAL_TOKENS` is configured. Cost enforcement only works
-    when `AUTOCIM_LLM_COST_PER_1K_*` is also configured (`_estimate_cost_usd`
+    """Sums `llm_usage` (`TessellateState.llm_usage`, state.py -- one entry per
+    past LLM call this run) against whichever of `TESSELLATE_LLM_MAX_TOTAL_COST_USD`/
+    `TESSELLATE_LLM_MAX_TOTAL_TOKENS` is configured. Cost enforcement only works
+    when `TESSELLATE_LLM_COST_PER_1K_*` is also configured (`_estimate_cost_usd`
     -- without a rate, `estimated_cost_usd` is always None, so a cost cap
     alone can never trip); the token cap works regardless, since real token
     counts come straight from the provider's response whenever it exposes
@@ -427,7 +427,7 @@ def invoke_with_retry(
     transient-error case that used to fall back on the very first blip.
 
     `max_retries`/`base_delay`/`max_delay` default to the
-    `AUTOCIM_LLM_*` env vars (see module docstring) when not passed
+    `TESSELLATE_LLM_*` env vars (see module docstring) when not passed
     explicitly -- `sleep_fn` is the only pure-test seam (tests inject a
     no-op so retry tests don't actually wait out a real backoff)."""
     max_retries = max_retries if max_retries is not None else _int_env(_MAX_RETRIES_ENV, _DEFAULT_MAX_RETRIES)
