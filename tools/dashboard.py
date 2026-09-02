@@ -1,15 +1,15 @@
-"""Static HTML dashboard for one AutoCIM-Agent run (state.py's `AutoCIMState`).
+"""Static HTML dashboard for one Tessellate run (state.py's `TessellateState`).
 
 Real multi-researcher use needs more than `state["messages"]`'s free text
 to build trust in / debug a run: which candidate was tried each iteration
 and *why* (`planner_decisions`, appended by `nodes/planner.py`), what it
 actually measured (`candidate_history`, appended by `nodes/evaluator.py`),
 and how many LLM calls it took, including retries/failures (`llm_usage`).
-This module joins those three already-structured `AutoCIMState` fields -- the authoritative
+This module joins those three already-structured `TessellateState` fields -- the authoritative
 numeric record -- into one self-contained HTML report.
 
 `observability.py`'s JSON-Lines log is a separate, narrative/audit channel
-(when/in-what-order things happened) -- this module reads `AutoCIMState`
+(when/in-what-order things happened) -- this module reads `TessellateState`
 directly, not that log, since state is the source of truth for the actual
 numbers.
 
@@ -26,10 +26,10 @@ import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from schemas.config import HWConfig
-from state import AutoCIMState
+from state import TessellateState
 
 
-def _iteration_rows(state: AutoCIMState) -> List[Dict[str, Any]]:
+def _iteration_rows(state: TessellateState) -> List[Dict[str, Any]]:
     """One row per evaluated candidate, joining `candidate_history`
     (what happened) against `planner_decisions` (why it was tried) by
     `iteration` -- the two lists are appended by different nodes
@@ -574,7 +574,7 @@ def _table_rows_html(rows: List[Dict[str, Any]]) -> str:
     return "\n".join(blocks)
 
 
-def _calibration_section_html(state: AutoCIMState) -> str:
+def _calibration_section_html(state: TessellateState) -> str:
     """Whether this run's energy/latency numbers are grounded in a real
     published reference (`tools.calibration`) or are still the uncorrected
     analytical fast-approximation (`tools.cim_physics`) -- the honest stand-
@@ -671,7 +671,7 @@ def _or_unset(value: Any, suffix: str = "") -> str:
     return f"{html.escape(f'{value:g}' if isinstance(value, float) else str(value))}{suffix}"
 
 
-def _run_config_section_html(state: AutoCIMState, hw_config: Optional[HWConfig]) -> str:
+def _run_config_section_html(state: TessellateState, hw_config: Optional[HWConfig]) -> str:
     """The exact workload and hardware this run was executed against.
 
     Previously the report named only `model_id`/`hw_spec_id`, which is an
@@ -679,7 +679,7 @@ def _run_config_section_html(state: AutoCIMState, hw_config: Optional[HWConfig])
     8-bit or a 4-bit ADC, how many tiles were available, or what device
     non-idealities were modelled -- all of which change every energy and
     accuracy number below. `hw_config` is passed in rather than read from
-    state because `AutoCIMState` carries the id, not the resolved spec
+    state because `TessellateState` carries the id, not the resolved spec
     (main.py's `write_dashboard` resolves it through middleware's registry);
     when it can't be resolved the section degrades to the ids alone and says
     so, rather than inventing values (docs/coding_guidelines.md 5.C)."""
@@ -744,7 +744,7 @@ def _run_config_section_html(state: AutoCIMState, hw_config: Optional[HWConfig])
     )
 
 
-def _targets_section_html(state: AutoCIMState) -> str:
+def _targets_section_html(state: TessellateState) -> str:
     """What "converged" was actually being measured against.
 
     `is_converged` is the only outcome the header reports, but it is a
@@ -872,7 +872,7 @@ def _targets_section_html(state: AutoCIMState) -> str:
     )
 
 
-def _llm_usage_summary(state: AutoCIMState) -> Dict[str, Any]:
+def _llm_usage_summary(state: TessellateState) -> Dict[str, Any]:
     usage = state.get("llm_usage", [])
     return {
         "n_calls": len(usage),
@@ -881,9 +881,9 @@ def _llm_usage_summary(state: AutoCIMState) -> Dict[str, Any]:
     }
 
 
-def render_dashboard_html(state: AutoCIMState, hw_config: Optional[HWConfig] = None) -> str:
+def render_dashboard_html(state: TessellateState, hw_config: Optional[HWConfig] = None) -> str:
     """Pure function of `state` (plus the optional resolved `hw_config`, which
-    `AutoCIMState` only names by id) -- no I/O, no LangGraph/checkpointer
+    `TessellateState` only names by id) -- no I/O, no LangGraph/checkpointer
     dependency, so it's directly unit-testable against a synthetic state
     (state_factory in tests) exactly like the rest of this project's
     Mock-First-tested tools. `hw_config=None` renders every other section
