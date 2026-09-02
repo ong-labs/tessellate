@@ -73,7 +73,7 @@ from nodes.common import run_id_for
 from observability import log_event
 from schemas.planner import PlannerLayerDecision
 from schemas.tools import LayerBitConfig
-from state import AutoCIMState, merge_dicts
+from state import TessellateState, merge_dicts
 from tools.cim_physics import snap_pruning_ratio
 from tools.qat import get_layer_groups, get_stage_weight_shapes
 from tools.search import (
@@ -135,7 +135,7 @@ def search_seed_for(model_id: str, hw_spec_id: str, run_seed: int = 0) -> int:
     computing all warm-up points up front must reproduce, not diverge
     from, what `_propose_stage_points` would have produced one at a time.
 
-    `run_seed` (state.py's `run_seed`, `AutoCIMState`) defaults to 0,
+    `run_seed` (state.py's `run_seed`, `TessellateState`) defaults to 0,
     identical to this function's behavior before the parameter existed --
     without it, *every* session on the same (model_id, hw_spec_id) always
     explored the exact same warm-up points and NSGA-II trajectory, so
@@ -148,7 +148,7 @@ def search_seed_for(model_id: str, hw_spec_id: str, run_seed: int = 0) -> int:
 
 
 _SYSTEM_PROMPT = (
-    "You are the @planner agent in AutoCIM-Agent, a CIM-chip HW-SW "
+    "You are the @planner agent in Tessellate, a CIM-chip HW-SW "
     "co-design optimizer. You are given the target model's real stages, a "
     "per_stage_suggested_candidate -- one (weight_bits, column_pruning_ratio) "
     "pair per stage, already finalized by a statistical search (Latin "
@@ -248,7 +248,7 @@ def real_stage_names(model_id: str) -> List[str]:
 
 
 def _propose_stage_points(
-    state: AutoCIMState, stage_names: List[str], overrides: Optional[Dict[str, Any]] = None
+    state: TessellateState, stage_names: List[str], overrides: Optional[Dict[str, Any]] = None
 ) -> Tuple[StagePoint, str]:
     """Returns one (weight_bits, column_pruning_ratio) point per real stage
     (in `stage_names` order) and a short tag describing which search phase
@@ -352,7 +352,7 @@ def _describe_hw_bounds(hw_spec_id: str) -> str:
 
 
 def _build_user_prompt(
-    state: AutoCIMState,
+    state: TessellateState,
     overrides: Dict[str, Any],
     search_tag: str,
     stage_configs: List[LayerBitConfig],
@@ -390,7 +390,7 @@ def _extract_decision(response: Any) -> PlannerLayerDecision:
 
 
 def _explain_decision(
-    state: AutoCIMState,
+    state: TessellateState,
     overrides: Dict[str, Any],
     search_tag: str,
     stage_configs: List[LayerBitConfig],
@@ -440,7 +440,7 @@ def _explain_decision(
     return decision.rationale, decision.rationale_ko, decision.anomaly_note, usage_record
 
 
-def planner_node(state: AutoCIMState) -> Dict[str, Any]:
+def planner_node(state: TessellateState) -> Dict[str, Any]:
     iteration_count = state.get("iteration_count", 0) + 1
     new_overrides = state.get("human_overrides", {})  # read once, before clearing
     # Merge, not replace: bounds a researcher already approved in an earlier
