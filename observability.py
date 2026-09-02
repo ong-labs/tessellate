@@ -1,25 +1,25 @@
-"""Structured, per-run event logging for AutoCIM-Agent.
+"""Structured, per-run event logging for Tessellate.
 
 `state["messages"]` (state.py) is free-text meant for the LLM's own context
 window (`middleware.py`'s context-pruning operates on it) -- not something a
 researcher can grep, filter by iteration, or machine-parse across a run
 shared with teammates. This module is the separate structured channel real
 multi-researcher use needs: one JSON object per notable event
-(`log_event`), always written as JSON Lines to `<AUTOCIM_LOG_DIR>/<run_id>.jsonl`
+(`log_event`), always written as JSON Lines to `<TESSELLATE_LOG_DIR>/<run_id>.jsonl`
 (one file per run -- `nodes.common.run_id_for` -- so concurrent
 researchers' sessions never interleave in the same file) -- no new
 dependency, `tail -f`-able, and machine-parseable line by line.
 
-Mirroring the same JSON lines to stdout is opt-in (`AUTOCIM_LOG_STDOUT=1`),
+Mirroring the same JSON lines to stdout is opt-in (`TESSELLATE_LOG_STDOUT=1`),
 not default: `main.py`'s own per-node summary (`stream_until_interrupt`)
 already gives a human watching the terminal live progress, so mirroring
 every event here too would just print the same information twice in two
-different formats. Set `AUTOCIM_LOG_STDOUT=1` for the old
+different formats. Set `TESSELLATE_LOG_STDOUT=1` for the old
 `tail -f`/log-aggregator-piping use case.
 
 Callers (`nodes/planner.py`'s `candidate_proposed`, `nodes/evaluator.py`'s
 `candidate_evaluated`) log events that echo already-structured
-`AutoCIMState` fields (`planner_decisions`, `candidate_history`) -- this
+`TessellateState` fields (`planner_decisions`, `candidate_history`) -- this
 file is the narrative/audit trail of *when* and *in what order* things
 happened, not a second source of truth; `tools/dashboard.py` reads state
 directly, not this log.
@@ -28,7 +28,7 @@ Every record also carries `code_version` (`_get_code_version`): the search
 algorithm and simulators here are still actively changing, so "which code
 produced this candidate_history/Pareto front" is real information a
 researcher needs across a run that might span several code changes
-(a session can be paused at HITL for days) -- `AutoCIMState` itself has no
+(a session can be paused at HITL for days) -- `TessellateState` itself has no
 natural place for this (it's a property of the process that ran a step,
 not of the optimization data itself), so it lives in this audit log
 instead, computed fresh (and cheaply cached) from `git`, not persisted
@@ -47,8 +47,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-_LOG_DIR_ENV = "AUTOCIM_LOG_DIR"
-_STDOUT_ENV = "AUTOCIM_LOG_STDOUT"
+_LOG_DIR_ENV = "TESSELLATE_LOG_DIR"
+_STDOUT_ENV = "TESSELLATE_LOG_STDOUT"
 _DEFAULT_LOG_DIR = Path(__file__).resolve().parent / ".cache" / "logs"
 _REPO_ROOT = Path(__file__).resolve().parent
 
@@ -125,7 +125,7 @@ def _get_run_logger(run_id: str) -> logging.Logger:
     if run_id in _loggers:
         return _loggers[run_id]
 
-    logger = logging.getLogger(f"autocim.run.{run_id}")
+    logger = logging.getLogger(f"tessellate.run.{run_id}")
     logger.setLevel(logging.INFO)
     logger.propagate = False  # never also feed the root logger's handlers
 
@@ -168,7 +168,7 @@ def reset_loggers() -> None:
     """Closes and forgets every cached per-run logger/handler. Real callers
     never need this (loggers live for the process's lifetime) -- it exists
     so tests get a fresh logger (and thus a fresh log file, honoring a
-    just-changed AUTOCIM_LOG_DIR) instead of a stale cached one left over
+    just-changed TESSELLATE_LOG_DIR) instead of a stale cached one left over
     from an earlier test's tmp_path.
 
     Deliberately does *not* clear `_code_version_cache`: unlike the log
