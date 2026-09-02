@@ -3,7 +3,7 @@
 # something to commit (the CIFAR10 cache alone is ~340MB).
 .cache/
 scratch_qat_test/
-# observability.py's default AUTOCIM_LOG_DIR and any ad-hoc log output.
+# observability.py's default TESSELLATE_LOG_DIR and any ad-hoc log output.
 logs/
 *.log
 *.jsonl
