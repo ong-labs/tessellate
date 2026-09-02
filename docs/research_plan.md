@@ -2,9 +2,9 @@
 
 > **이 문서는 프로젝트 초기 기획서입니다.** 구현이 진행되며 실제 아키텍처/알고리즘이 아래 내용과 달라진 부분이 있습니다 (예: `@precision_verifier` 노드 부재, "정규화 다중 목적 탐색" 서술이 실제 NSGA-II 리라이트 이전 상태). **현재 실제 구현을 반영한 아키텍처/설계 근거는 [`../README.md`](../README.md)를 기준으로 삼으세요.** 이 문서는 프로젝트의 최초 문제의식과 목표를 기록해두기 위해 그대로 남겨둡니다.
 
-## AutoCIM-Agent: CIM 및 온디바이스 AI 환경을 위한 하드웨어 인지형 자율 멀티에이전트 모델 최적화 프레임워크
+## Tessellate: CIM 및 온디바이스 AI 환경을 위한 하드웨어 인지형 자율 멀티에이전트 모델 최적화 프레임워크
 
-**AutoCIM-Agent: A CIM-Aware Autonomous Multi-Agent Framework for On-Device AI Model Optimization**
+**Tessellate: A CIM-Aware Autonomous Multi-Agent Framework for On-Device AI Model Optimization**
 
 ---
 
@@ -23,7 +23,7 @@
 
 ### 2. 제안하는 시스템 (Proposed Methodology)
 
-본 연구에서는 이러한 문제를 해결하기 위해 LangGraph 기반의 6-에이전트 자율 최적화 프레임워크인 `AutoCIM-Agent`를 제안합니다. `AutoCIM-Agent`는 LLM의 추론 및 의사결정 능력과 백엔드 파이썬/C++ 시뮬레이터 코드(`@tool`)를 유기적으로 연결하여, 하드웨어 제약조건을 준수하는 최적의 경량화 조합을 자율적으로 탐색하는 폐루프(Closed-Loop) 시스템입니다.
+본 연구에서는 이러한 문제를 해결하기 위해 LangGraph 기반의 6-에이전트 자율 최적화 프레임워크인 `Tessellate`를 제안합니다. `Tessellate`는 LLM의 추론 및 의사결정 능력과 백엔드 파이썬/C++ 시뮬레이터 코드(`@tool`)를 유기적으로 연결하여, 하드웨어 제약조건을 준수하는 최적의 경량화 조합을 자율적으로 탐색하는 폐루프(Closed-Loop) 시스템입니다.
 
 ```mermaid
 graph TD
@@ -59,7 +59,7 @@ graph TD
 
    * **서브에이전트 간 협업 및 피드백 메커니즘 (Collaboration & Feedback Mechanism)**
       * **하이브리드 병렬 실행 및 상태 합성 (Parallel Fan-out/Fan-in & State Reducer)**: `@tuner` 완료 후 `@mapper`와 `@profiler`를 동시 병렬 구동(Fan-out)하여 탐색 시간을 단축하며, Custom State Reducer(`merge_dicts`)를 통해 두 에이전트의 물리 수치를 충돌 없이 통합하여 `@verifier`로 합성(Fan-in)합니다.
-      * **상태 공유 및 동적 제어 (State Sharing & Dynamic Routing)**: LangGraph 세션 메모리(`AutoCIMState`)를 매개로 에이전트 간 실행 상태를 전달하며, `@evaluator`가 수렴 완료(`Converged`), 연구원 판단 필요(`HITL Interrupt`), 이력 기반 재탐색(`Re-plan with History`)으로 실행 흐름을 동적으로 라우팅합니다.
+      * **상태 공유 및 동적 제어 (State Sharing & Dynamic Routing)**: LangGraph 세션 메모리(`TessellateState`)를 매개로 에이전트 간 실행 상태를 전달하며, `@evaluator`가 수렴 완료(`Converged`), 연구원 판단 필요(`HITL Interrupt`), 이력 기반 재탐색(`Re-plan with History`)으로 실행 흐름을 동적으로 라우팅합니다.
       * **폐루프 피드백 및 지식 전이 (Closed-Loop Feedback & Knowledge Transfer)**: 미수렴 시 발생한 오차 수치를 단기 이력(`failure_history`) 및 장기 메모리(`runtime.store`)에 축적(`operator.add`)하여 `@planner`의 차세대 대리 모델 정밀도를 지속적으로 정교화합니다.
 
 ---
@@ -93,7 +93,7 @@ graph TD
 
 
 * **3계층 메모리 아키텍처, State Reducer 및 HITL 제어 루프 (`@evaluator`, `@planner`)**
-   * **단기 메모리 및 State Reducer Store (`AutoCIMState`)**: Pydantic Schema 기반 실시간 파라미터 전달, 병렬 수치 데이터를 충돌 없이 합치는 Custom Reducer(`merge_dicts`), 과거 미수렴 이력을 지속 누적하는 리스트 Reducer(`operator.add`), 그리고 최대 재시도 횟수(Max Retry Limit) 기반 무한 루프 차단을 수행합니다.
+   * **단기 메모리 및 State Reducer Store (`TessellateState`)**: Pydantic Schema 기반 실시간 파라미터 전달, 병렬 수치 데이터를 충돌 없이 합치는 Custom Reducer(`merge_dicts`), 과거 미수렴 이력을 지속 누적하는 리스트 Reducer(`operator.add`), 그리고 최대 재시도 횟수(Max Retry Limit) 기반 무한 루프 차단을 수행합니다.
    * **Target Model별 장기 메모리 (Model-Specific Long-Term Store)**: Raw `get` 방식을 통해 기존 모델의 민감도 지형도를 즉시 로드하고, 신규 모델 입점 시 Indexed `search` 기반 시맨틱 검색으로 구조적 유사 모델의 최적화 노하우를 전이(Knowledge Transfer)합니다. 최적화 완료 시 `store.put`으로 파레토 최적해 및 인덱싱 정보를 갱신합니다.
    * **글로벌 HW 장기 메모리 (Global HW-Aware Long-Term Store)**: CIM Crossbar 규격별 오차 보정 계수(Calibration Factor)와 NoC/버퍼 지연 룰베이스를 `store.put`으로 글로벌 영구 데이터베이스에 축적하여 반복 구동 오버헤드를 최소화합니다.
    * **자율 제어용 Agent Middleware 및 체크포인터**:
@@ -160,7 +160,7 @@ def namespaced_metrics_reducer(left: Dict[str, Any], right: Dict[str, Any]) -> D
 # ---------------------------------------------------------------------------
 # 2. State Schema 정의
 # ---------------------------------------------------------------------------
-class AutoCIMState(TypedDict):
+class TessellateState(TypedDict):
     messages: Annotated[list, operator.add]
     failure_history: Annotated[list, operator.add]
     metrics_store: Annotated[Dict[str, Any], namespaced_metrics_reducer]  # 네임스페이스 Reducer 적용
@@ -177,7 +177,7 @@ class AutoCIMState(TypedDict):
 # ---------------------------------------------------------------------------
 # 3. 노드(Node) 함수 정의
 # ---------------------------------------------------------------------------
-def planner_node(state: AutoCIMState) -> Dict[str, Any]:
+def planner_node(state: TessellateState) -> Dict[str, Any]:
     current_iter = state.get("iteration_count", 0) + 1
     overrides = state.get("human_overrides", {})
     
@@ -192,10 +192,10 @@ def planner_node(state: AutoCIMState) -> Dict[str, Any]:
 
     return {"current_step": "planner", "iteration_count": current_iter}
 
-def tuner_node(state: AutoCIMState) -> Dict[str, Any]:
+def tuner_node(state: TessellateState) -> Dict[str, Any]:
     return {"current_step": "tuner"}
 
-def mapper_node(state: AutoCIMState) -> Dict[str, Any]:
+def mapper_node(state: TessellateState) -> Dict[str, Any]:
     try:
         return {
             "metrics_store": {
@@ -217,7 +217,7 @@ def mapper_node(state: AutoCIMState) -> Dict[str, Any]:
             }
         }
 
-def profiler_node(state: AutoCIMState) -> Dict[str, Any]:
+def profiler_node(state: TessellateState) -> Dict[str, Any]:
     try:
         return {
             "current_step": "profiler",
@@ -241,15 +241,15 @@ def profiler_node(state: AutoCIMState) -> Dict[str, Any]:
             }
         }
 
-def verifier_node(state: AutoCIMState) -> Dict[str, Any]:
+def verifier_node(state: TessellateState) -> Dict[str, Any]:
     return {"current_step": "verifier"}
 
-def evaluator_node(state: AutoCIMState) -> Dict[str, Any]:
+def evaluator_node(state: TessellateState) -> Dict[str, Any]:
     is_converged = state.get("is_converged", False)
     new_history = [] if is_converged else [{"iteration": state.get("iteration_count", 1), "reason": "Target 지표 미달성"}]
     return {"current_step": "evaluator", "failure_history": new_history}
 
-def hitl_node(state: AutoCIMState) -> Dict[str, Any]:
+def hitl_node(state: TessellateState) -> Dict[str, Any]:
     # Dynamic Interrupt를 통해 연구원 입력 대기
     human_input = interrupt({"reason": "지표 미달성으로 인한 연구원 개입 요청"})
     return {
@@ -261,12 +261,12 @@ def hitl_node(state: AutoCIMState) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # 4. 라우터 및 그래프 구축
 # ---------------------------------------------------------------------------
-def evaluator_router(state: AutoCIMState) -> Literal["Converged (Done)", "HITL Interrupt", "Re-plan with History"]:
+def evaluator_router(state: TessellateState) -> Literal["Converged (Done)", "HITL Interrupt", "Re-plan with History"]:
     if state.get("is_converged", False): return "Converged (Done)"
     if state.get("needs_hitl", False): return "HITL Interrupt"
     return "Re-plan with History"
 
-workflow = StateGraph(AutoCIMState)
+workflow = StateGraph(TessellateState)
 
 workflow.add_node("planner", planner_node)
 workflow.add_node("tuner", tuner_node)
