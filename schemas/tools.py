@@ -1,10 +1,10 @@
-"""Tool input/output validation schemas for AutoCIM-Agent.
+"""Tool input/output validation schemas for Tessellate.
 
 Every backend tool (@tuner, @mapper, @profiler, @verifier) is validated
 through `wrap_tool_call` using the models below. Inputs carry
 an `ExecutionContext` + `HWConfig` pair instead of hardcoded model/hardware
 values, and outputs share a common envelope so they merge cleanly into
-`AutoCIMState.metrics_store` (see docs/coding_guidelines.md 5.A/5.C).
+`TessellateState.metrics_store` (see docs/coding_guidelines.md 5.A/5.C).
 """
 
 from enum import Enum
