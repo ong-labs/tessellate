@@ -14,7 +14,7 @@ computations nodes/tuner.py through nodes/verifier.py drive one at a time
 -- PyTorch's C++/CUDA kernels (and NumPy's BLAS calls in the analytical
 mapper/profiler math) release the GIL during the actual compute, so
 CPU-bound QAT trials genuinely parallelize across threads, not just
-I/O-bound work. `main.py` seeds `AutoCIMState.candidate_history` with the
+I/O-bound work. `main.py` seeds `TessellateState.candidate_history` with the
 results before its sequential graph loop starts, so @planner's search-space
 history already reflects every warm-up candidate instead of the loop
 re-discovering them one iteration at a time.
@@ -191,7 +191,7 @@ def run_parallel_warmup(
     """Evaluates every LHS warm-up candidate for `(model_id, hw_config)`
     concurrently and returns `(candidate_history_entries, failure_entries,
     planner_decisions_entries)` -- ready to seed
-    `AutoCIMState.candidate_history`/`failure_history`/`planner_decisions`
+    `TessellateState.candidate_history`/`failure_history`/`planner_decisions`
     (state.py) before `main.py`'s sequential graph loop starts.
     `calibration_factors` should be the same dict `main.py` seeds into the
     initial state (`tools.calibration.bootstrap_calibration_factors`) --
