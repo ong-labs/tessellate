@@ -1,4 +1,4 @@
-"""AutoCIM-Agent LangGraph assembly (Research_Plan.md 2절).
+"""Tessellate LangGraph assembly (Research_Plan.md 2절).
 
 START -> planner -> tuner -> (mapper, profiler fan-out) -> verifier -> evaluator
                                                                             |
@@ -51,10 +51,10 @@ from nodes import (
     tuner_node,
     verifier_node,
 )
-from state import AutoCIMState
+from state import TessellateState
 
 
-def hitl_router(state: AutoCIMState) -> Literal["Concluded (low confidence)", "Re-plan"]:
+def hitl_router(state: TessellateState) -> Literal["Concluded (low confidence)", "Re-plan"]:
     """hitl_node's `conclude_with_best` resume (main.py's auto-hitl giving
     up after its round cap) sets `low_confidence_conclusion` -- routes
     straight to `END` instead of the normal `planner` retry, skipping
@@ -64,7 +64,7 @@ def hitl_router(state: AutoCIMState) -> Literal["Concluded (low confidence)", "R
 
 
 def build_graph(checkpointer: Optional[BaseCheckpointSaver] = None) -> CompiledStateGraph:
-    workflow = StateGraph(AutoCIMState)
+    workflow = StateGraph(TessellateState)
 
     workflow.add_node("planner", planner_node)
     workflow.add_node("tuner", tuner_node)
