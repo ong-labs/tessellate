@@ -75,7 +75,7 @@ def run_one_replicate(
     default) -- N replicates run unattended, so a HITL prompt blocking on
     stdin would hang the whole batch."""
     print(f"\n### repeat_search: run_seed={run_seed} ###")
-    tmp_dir = Path(tempfile.mkdtemp(prefix="autocim_repeat_"))
+    tmp_dir = Path(tempfile.mkdtemp(prefix="tessellate_repeat_"))
     thread_id = f"repeat-seed-{run_seed}"
     original_long_term_db = main.DEFAULT_LONG_TERM_STORE_DB
     main.DEFAULT_LONG_TERM_STORE_DB = tmp_dir / "long_term_store.sqlite"
@@ -227,7 +227,7 @@ def print_report(results: List[Dict[str, Any]], summary: Dict[str, Any]) -> None
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run the same AutoCIM-Agent search N times with independent seeds and report variance."
+        description="Run the same Tessellate search N times with independent seeds and report variance."
     )
     parser.add_argument("--model-id", default="resnet18", help="Same meaning as main.py's --model-id.")
     parser.add_argument("--dataset-id", default=None, help="Same meaning as main.py's --dataset-id.")
