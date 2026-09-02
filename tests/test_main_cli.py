@@ -336,7 +336,7 @@ def test_run_interactive_setup_confirm_back_returns_to_last_step(monkeypatch):
 
 def test_run_interactive_setup_confirm_shows_session_info_before_asking_to_proceed(monkeypatch, capsys):
     monkeypatch.setattr(main, "load_dotenv", lambda *a, **k: None)  # don't touch the real .env.local
-    monkeypatch.delenv("AUTOCIM_PLANNER_MODEL", raising=False)
+    monkeypatch.delenv("TESSELLATE_PLANNER_MODEL", raising=False)
     _feed_inputs(monkeypatch, ["3", _DECLINE_APPROX, "", "", "", "n", "y"])
 
     main.run_interactive_setup(_wizard_args(), "abcd1234-5678")
@@ -877,12 +877,12 @@ def test_main_skips_interactive_setup_when_stdin_is_not_a_tty(monkeypatch, tmp_p
 
 def test_main_prints_resolved_llm_and_device_before_running(monkeypatch, tmp_path, capsys):
     # Neutralize main()'s own load_dotenv(".env.local", override=True) --
-    # otherwise a real .env.local (gitignored, may set AUTOCIM_PLANNER_MODEL)
+    # otherwise a real .env.local (gitignored, may set TESSELLATE_PLANNER_MODEL)
     # would clobber the env vars this test sets below.
     monkeypatch.setattr(main, "load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.setattr(main, "run_session", lambda *args, **kwargs: None)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.delenv("AUTOCIM_PLANNER_MODEL", raising=False)
+    monkeypatch.delenv("TESSELLATE_PLANNER_MODEL", raising=False)
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -904,7 +904,7 @@ def test_main_prints_llm_fallback_reason_when_api_key_missing(monkeypatch, tmp_p
     monkeypatch.setattr(main, "load_dotenv", lambda *args, **kwargs: None)
     monkeypatch.setattr(main, "run_session", lambda *args, **kwargs: None)
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    monkeypatch.setenv("AUTOCIM_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
+    monkeypatch.setenv("TESSELLATE_PLANNER_MODEL", "anthropic:claude-sonnet-4-5-20250929")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(
         "sys.argv",
