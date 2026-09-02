@@ -7,7 +7,7 @@
 # codebase uses throughout).
 
 [lint.per-file-ignores]
-# notebooks/autocim_agent_demo.ipynb must set the AUTOCIM_QAT_* env vars and
+# notebooks/tessellate_demo.ipynb must set the TESSELLATE_QAT_* env vars and
 # put the project root on sys.path *before* importing any project module:
 # the notebook lives in notebooks/, so `import graph` fails until sys.path is
 # fixed, and tools/qat.py resolves its dataset-size env vars when the backend
