@@ -1,13 +1,13 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "AutoCIM-Agent"
+title: "Tessellate"
 abstract: >-
   A LangGraph-based 7-agent HW-SW co-design optimization framework for
   Compute-In-Memory (CIM) accelerators, jointly exploring quantization,
   pruning, and crossbar mapping under hardware constraints.
 authors:
   - name: "ong-labs"
-repository-code: "https://github.com/ong-labs/autocim-agent"
+repository-code: "https://github.com/ong-labs/tessellate"
 license: BSD-3-Clause
 version: 0.1.0
 date-released: "2026-07-30"
