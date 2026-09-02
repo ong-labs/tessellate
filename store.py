@@ -1,4 +1,4 @@
-"""Long-term memory stores for AutoCIM-Agent.
+"""Long-term memory stores for Tessellate.
 
 Implements the two long-term tiers of the 3-tier memory architecture from
 Research_Plan.md section 3 (short-term state + reducers live in state.py):
@@ -176,7 +176,7 @@ class ModelSpecificStore:
     optimization know-how from structurally similar ones.
     """
 
-    NAMESPACE_PREFIX: Namespace = ("autocim", "model")
+    NAMESPACE_PREFIX: Namespace = ("tessellate", "model")
 
     def __init__(self, backend: BaseLongTermStore):
         self._backend = backend
@@ -209,7 +209,7 @@ class GlobalHWStore:
     simulation overhead.
     """
 
-    NAMESPACE_PREFIX: Namespace = ("autocim", "hw")
+    NAMESPACE_PREFIX: Namespace = ("tessellate", "hw")
 
     def __init__(self, backend: BaseLongTermStore):
         self._backend = backend
