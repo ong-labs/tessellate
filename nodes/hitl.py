@@ -38,10 +38,10 @@ from typing import Any, Dict
 
 from langgraph.types import interrupt
 
-from state import AutoCIMState
+from state import TessellateState
 
 
-def hitl_node(state: AutoCIMState) -> Dict[str, Any]:
+def hitl_node(state: TessellateState) -> Dict[str, Any]:
     human_input = interrupt(
         {
             "reason": "Convergence stalled -- researcher review requested",
