@@ -14,24 +14,24 @@ CIM(Compute-In-Memory) 가속기의 양자화 설정과 하드웨어 제약을 �
 
 ```mermaid
 graph TD
-    START[__start__] --> planner["@planner (탐색/대리모델)"]
-    planner --> tuner["@tuner (PyTorch QAT)"]
+    START[__start__] --> planner["@planner"]
+    planner --> tuner["@tuner"]
 
-    tuner --> mapper["@mapper (NoC 매핑)"]
-    tuner --> profiler["@profiler (물리 시뮬레이션)"]
+    tuner --> mapper["@mapper"]
+    tuner --> profiler["@profiler"]
 
-    mapper --> verifier["@verifier (IR-drop/노이즈 검증)"]
+    mapper --> verifier["@verifier"]
     profiler --> verifier
 
-    verifier --> evaluator["@evaluator (수렴 판정/Pareto rank)"]
+    verifier --> evaluator["@evaluator"]
 
     evaluator -- "Re-plan with History" --> planner
-    evaluator -- "HITL Interrupt" --> hitl["hitl_human_approval<br/>(사람 개입, 예외가 아닌 핵심 경로)"]
-    evaluator -- "Converged (Done)" --> precision["@precision_verifier (정밀 재검증)"]
+    evaluator -- "HITL Interrupt" --> hitl["hitl_human_<br/>approval"]
+    evaluator -- "Converged (Done)" --> precision["@precision_<br/>verifier"]
 
     precision -- "Re-plan with History" --> planner
     precision -- "HITL Interrupt" --> hitl
-    precision -- "Converged (Done)" --> END["__end__<br/>(연구자 검토 후보 -- 최종 확정 X)"]
+    precision -- "Converged (Done)" --> END["__end__"]
 
     hitl -- "Re-plan" --> planner
     hitl -- "Concluded (low confidence)" --> END
@@ -45,6 +45,8 @@ graph TD
 | `@verifier` | IR-drop과 노이즈 마진으로 수렴 판정 |
 | `@evaluator` | 스키마 검증, 파레토 랭크, 재탐색과 HITL 라우팅 |
 | `@precision_verifier` | 수렴 후보만 2단계 재검증하고 보정 계수 갱신 |
+| `hitl_human_approval` | 사람 개입, 예외가 아닌 핵심 경로 |
+| `__end__` | 연구자 검토 후보이고 최종 확정이 아님 |
 
 > **한계가 셋 있습니다.** `@mapper`와 `@profiler`는 정밀 시뮬레이터가 아니라 물리 법칙 기반 근사이고, 학습 데이터는 CIFAR10 서브셋이며, NSGA-II 탐색은 15개 내외의 실측 워밍업 후보로 학습한 대리모델 위에서 돕니다. 후보 사이의 상대 비교에는 쓸 수 있으나 절대 수치를 벤치마크나 제품 규격으로 인용할 수는 없습니다. 자세한 내용은 [`docs/limitations.md`](docs/limitations.md)에 있습니다.
 
