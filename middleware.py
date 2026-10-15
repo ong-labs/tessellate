@@ -1,6 +1,6 @@
 """Tool interceptor and context-management middleware for Tessellate.
 
-Two independent concerns live here (docs/coding_guidelines.md 5.D):
+Two independent concerns live here (docs/coding_guidelines.md D):
 
 1. `wrap_tool_call` -- the single choke point every backend tool (PyTorch /
    NeuroSim / CIM-Loop wrapper) passes through. It validates LLM-supplied
@@ -72,7 +72,7 @@ def get_execution_context() -> ExecutionContext:
 
 def register_hw_config(hw_config: HWConfig) -> None:
     """Register a resolved HWConfig so tools can look it up by hw_spec_id
-    instead of hardcoding hardware numbers (docs/coding_guidelines.md 5.C)."""
+    instead of hardcoding hardware numbers (docs/coding_guidelines.md C)."""
     _hw_config_registry[hw_config.hw_spec_id] = hw_config
 
 
@@ -171,7 +171,7 @@ def _message_text(message: Any) -> str:
 
 
 def default_summarizer(messages: List[Any], max_chars: int) -> str:
-    """Mock-First (docs/coding_guidelines.md 5.D) summarizer: truncated concatenation, no
+    """Mock-First (docs/coding_guidelines.md D) summarizer: truncated concatenation, no
     LLM call. Swap for a real LLM-backed summarizer later -- callers only
     depend on the `Callable[[List[Any], int], str]` signature."""
     joined = " | ".join(_message_text(m) for m in messages)

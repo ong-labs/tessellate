@@ -3,7 +3,7 @@
 Hardware constraints and run-scoped identifiers live here. Node/tool logic
 must load these values through `HWConfig`/`ExecutionContext` instances
 rather than hardcoding hardware numbers or model architecture details
-(see docs/coding_guidelines.md 5.C).
+(see docs/coding_guidelines.md C).
 """
 
 from enum import Enum

@@ -17,7 +17,7 @@ bandwidth-limited transfer timing for @mapper, and CIM device-physics
 scaling laws (ADC/DAC/crossbar energy, parallel-array compute latency) for
 @profiler. Mapper/profiler are still "Fast Approximation" models in
 Research_Plan.md's sense, not bindings to the actual NeuroSim/CIM-Loop
-C-extensions (docs/coding_guidelines.md 5.D: Mock First for those) -- `calibration_factors`
+C-extensions (docs/coding_guidelines.md D: Mock First for those) -- `calibration_factors`
 (per hw_spec_id) is the intended correction loop against precise simulation
 over time.
 """
@@ -203,7 +203,7 @@ def verifier_tool(args: VerifierToolInput) -> VerifierToolOutput:
 @wrap_tool_call(PrecisionCheckToolInput, node_name="precision_check")
 def precision_check_tool(args: PrecisionCheckToolInput) -> PrecisionCheckToolOutput:
     """MOCK Stage-2 high-fidelity re-verification (tools/precision_check.py,
-    docs/coding_guidelines.md 5.D Mock First) -- only called for a candidate @evaluator's
+    docs/coding_guidelines.md D Mock First) -- only called for a candidate @evaluator's
     fast-approximation already judged converged (nodes/precision_verifier.py),
     never every candidate a run searches: a real NeuroSim/CIM-Loop call is
     far more expensive than tools/cim_physics.py's analytical formulas, so

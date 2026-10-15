@@ -141,11 +141,11 @@ CIM 칩의 실제 동작을 검증하는 방법은 두 극단이 있습니다.
 
 **왜 컬럼별/partial-sum 양자화까지 따로 구현했는가**: 레이어 전체가 스케일 하나를 공유하면, 크로스바 컬럼마다 실제로는 물리적으로 분리된 읽기 경로를 갖는다는 사실을 반영하지 못합니다. 실측 결과(README) 같은 resnet18 가중치에서 4비트 기준 레이어별 59~94%의 양자화 오차(MSE) 감소를 확인했습니다. 여기서 더 나아가, ADC가 실제로 읽는 값이 가중치가 아니라 컬럼의 아날로그 누적값(partial sum)이라는 점에 착안해 레이어 출력 자체도 `adc_bits` 해상도로 별도 양자화합니다 — 가중치 정밀도와 무관하게 ADC 해상도 자체가 만드는 오차를 분리해서 시뮬레이션에 반영하기 위해서입니다.
 
-**왜 디바이스(CUDA/MPS/CPU)를 자동 감지하는가**: 대부분의 CI/개발 환경에 GPU가 없다는 전제(docs/coding_guidelines.md 5.C) 아래, `_resolve_device`가 CUDA → Apple MPS → CPU 순으로 자동 판단하고 `TESSELLATE_QAT_DEVICE`로 강제 오버라이드할 수 있게 해뒀습니다. 캐시된 베이스 모델/로더는 항상 CPU에 두고, 후보별 딥카피만 디바이스로 옮겨 공유 캐시가 특정 디바이스에 묶이지 않게 합니다.
+**왜 디바이스(CUDA/MPS/CPU)를 자동 감지하는가**: 대부분의 CI/개발 환경에 GPU가 없다는 전제(docs/coding_guidelines.md C) 아래, `_resolve_device`가 CUDA → Apple MPS → CPU 순으로 자동 판단하고 `TESSELLATE_QAT_DEVICE`로 강제 오버라이드할 수 있게 해뒀습니다. 캐시된 베이스 모델/로더는 항상 CPU에 두고, 후보별 딥카피만 디바이스로 옮겨 공유 캐시가 특정 디바이스에 묶이지 않게 합니다.
 
 **왜 CIFAR10 서브셋(기본 512/128/1000장)으로 동작하는가**: 후보 하나를 QAT로 평가하는 데 걸리는 시간이 탐색 전체의 병목이기 때문에, 빠른 반복 실험을 우선하는 **의도적인 스코프 결정**입니다(숨겨진 지름길이 아니라 README/roadmap에 명시). `TESSELLATE_QAT_TRAIN_SIZE`/`_VAL_SIZE`/`_TEST_SIZE`/`TESSELLATE_QAT_MAX_EPOCHS`로 필요하면 늘릴 수 있습니다. train/val/test는 진짜 3분할이라, 조기 종료(early stopping)가 test set을 절대 들여다보지 않습니다 — 그래야 보고되는 정확도가 그 정확도를 만든 결정에 새어 들어가지 않습니다(정보 누수 방지).
 
-**왜 아키텍처/데이터셋이 하드코딩된 3~1개가 아니라 레지스트리인가**: `_MODEL_REGISTRY`/`_DATASET_REGISTRY`는 내장 항목(resnet18/mobilenet_v2/vit_tiny, cifar10) 외에도 `register_model`/`register_dataset` 런타임 등록이나 `"module.path:function_name"` 문자열 스펙으로 임의의 `nn.Module`/데이터셋을 연결할 수 있게 합니다 — docs/coding_guidelines.md 5.C의 "Model Agnostic" 요구사항(`@tuner`/`@mapper` 로직이 특정 아키텍처에 묶이면 안 됨)을 코드 변경 없이 만족시키기 위해서입니다.
+**왜 아키텍처/데이터셋이 하드코딩된 3~1개가 아니라 레지스트리인가**: `_MODEL_REGISTRY`/`_DATASET_REGISTRY`는 내장 항목(resnet18/mobilenet_v2/vit_tiny, cifar10) 외에도 `register_model`/`register_dataset` 런타임 등록이나 `"module.path:function_name"` 문자열 스펙으로 임의의 `nn.Module`/데이터셋을 연결할 수 있게 합니다 — docs/coding_guidelines.md C의 "Model Agnostic" 요구사항(`@tuner`/`@mapper` 로직이 특정 아키텍처에 묶이면 안 됨)을 코드 변경 없이 만족시키기 위해서입니다.
 
 ### 10.3 `@mapper` — 타일 배치와 NoC 지연시간 (`nodes/mapper.py`, `tools/cim_physics.py`)
 
@@ -155,7 +155,7 @@ CIM 칩의 실제 동작을 검증하는 방법은 두 극단이 있습니다.
 
 **왜 홉 카운트를 실제 그래프 거리 공식으로 계산하는가**: "NoC 지연시간은 대략 이 정도"라는 임의 상수를 쓰는 대신, mesh는 맨해튼 거리, ring은 원 위의 최단 호, torus는 wraparound를 감안한 거리처럼 **토폴로지별 실제 그래프 이론 공식**을 씁니다(`hop_distance`) — `HWConfig.noc_topology`가 바뀌면 지연시간 계산도 그 토폴로지의 실제 성질을 따라 바뀌게 하기 위해서입니다. 대역폭(`noc_link_bandwidth_gbps`)도 1 Gb/s = 1 bit/ns라는 단위 그대로 변환해서 쓰기 때문에, NoC 플릿(flit) 헤더 크기 하나를 제외하면 임의의 보정 상수가 필요 없습니다.
 
-**왜 `@profiler`와 병렬로 실행되는가**: `@tuner`가 끝나면 `@mapper`(지연시간 위주)와 `@profiler`(에너지 위주)는 서로의 결과가 필요 없는 독립적인 계산이라, LangGraph의 fan-out으로 동시에 실행해 탐색 전체 시간을 줄입니다. 두 노드가 동시에 `state["metrics_store"]`에 쓰기 때문에, 각자 자기 이름(`"mapper"`/`"profiler"`)의 네임스페이스에만 쓰도록 강제하는 `namespaced_metrics_reducer`(state.py)가 없으면 경쟁 조건(race condition)으로 서로의 결과를 덮어쓸 수 있습니다(docs/coding_guidelines.md 5.A).
+**왜 `@profiler`와 병렬로 실행되는가**: `@tuner`가 끝나면 `@mapper`(지연시간 위주)와 `@profiler`(에너지 위주)는 서로의 결과가 필요 없는 독립적인 계산이라, LangGraph의 fan-out으로 동시에 실행해 탐색 전체 시간을 줄입니다. 두 노드가 동시에 `state["metrics_store"]`에 쓰기 때문에, 각자 자기 이름(`"mapper"`/`"profiler"`)의 네임스페이스에만 쓰도록 강제하는 `namespaced_metrics_reducer`(state.py)가 없으면 경쟁 조건(race condition)으로 서로의 결과를 덮어쓸 수 있습니다(docs/coding_guidelines.md A).
 
 **왜 `state["planned_layer_configs"]`가 아니라 `@tuner`의 출력에서 설정을 읽는가**: `@planner`가 아직 아무 계획도 못 냈거나 LLM 호출이 실패해 `@tuner`가 자체 기본값(`default_layer_configs`)으로 폴백한 경우에도, `@mapper`/`@profiler`가 `@tuner`가 **실제로 사용한** 설정을 그대로 시뮬레이션하도록 보장하기 위해서입니다.
 
@@ -177,7 +177,7 @@ CIM 칩의 실제 동작을 검증하는 방법은 두 극단이 있습니다.
 
 **왜 정확도가 아니라 물리적 실현 가능성만 보는가**: 정확도는 `@tuner`가, 목표 달성 여부(§7의 target)는 `@evaluator`가 별도로 확인합니다. `@verifier`가 보는 건 그와 독립적인 질문 — "소프트웨어 지표가 좋아도, 배선 저항이나 소자 노이즈 때문에 이 칩이 물리적으로 실패하지 않는가"입니다. 이 판정을 정확도 판정과 분리해둔 것 자체가 "소프트웨어 지표만으로 완성을 선언하지 않는다"는 이 프로젝트의 원칙입니다.
 
-**왜 임계값이 하드코딩된 상수가 아니라 `HWConfig`에서 오는가**: `wire_resistance_ohm_per_um`/`device_noise_sigma`/`adc_bits`가 전부 `HWConfig`(주입된 하드웨어 스펙)에서 오기 때문에, 특정 칩 하나에 맞춘 허용치가 아니라 검증 대상 하드웨어마다 다른 물리적 한계를 반영합니다(docs/coding_guidelines.md 5.C).
+**왜 임계값이 하드코딩된 상수가 아니라 `HWConfig`에서 오는가**: `wire_resistance_ohm_per_um`/`device_noise_sigma`/`adc_bits`가 전부 `HWConfig`(주입된 하드웨어 스펙)에서 오기 때문에, 특정 칩 하나에 맞춘 허용치가 아니라 검증 대상 하드웨어마다 다른 물리적 한계를 반영합니다(docs/coding_guidelines.md C).
 
 ### 10.6 `@evaluator` — 스키마 검증, 이력 누적, 수렴/라우팅 판정 (`nodes/evaluator.py`, `tools/search.py`의 `compute_pareto_rank`)
 
@@ -193,7 +193,7 @@ CIM 칩의 실제 동작을 검증하는 방법은 두 극단이 있습니다.
 
 **역할**: LangGraph의 동적 `interrupt()`를 호출해 그래프 실행을 멈추고, 실패 이력·이상 징후·현재 탐색 범위·목표값을 사람에게 보여준 뒤, 사람이 승인한 새 탐색 범위(`new_bounds`)를 받아 `@planner`로 돌아갑니다.
 
-**왜 `compile()`의 `interrupt_before`가 아니라 노드 안의 `interrupt()`를 쓰는가**: LangGraph v0.2+ 표준(docs/coding_guidelines.md 5.B)이 권장하는 방식이라는 것 외에, `interrupt_before`는 그래프 컴파일 시점에 고정된 정지 지점이라 "왜 멈췄는지"에 대한 맥락(실패 이력, 이상 징후 등)을 실행 중 상태에서 동적으로 담아 보여줄 수 없습니다. 노드 안에서 `interrupt()`를 호출하면 그 순간의 state 전체를 담아 사람에게 넘길 수 있습니다.
+**왜 `compile()`의 `interrupt_before`가 아니라 노드 안의 `interrupt()`를 쓰는가**: LangGraph v0.2+ 표준(docs/coding_guidelines.md B)이 권장하는 방식이라는 것 외에, `interrupt_before`는 그래프 컴파일 시점에 고정된 정지 지점이라 "왜 멈췄는지"에 대한 맥락(실패 이력, 이상 징후 등)을 실행 중 상태에서 동적으로 담아 보여줄 수 없습니다. 노드 안에서 `interrupt()`를 호출하면 그 순간의 state 전체를 담아 사람에게 넘길 수 있습니다.
 
 **왜 `search_bound_overrides`(누적) 전체를 payload에 담는가**: 사람이 두 번째 HITL을 만났을 때, `main.py`의 제안 로직(`suggest_override_bounds`)이 하드웨어의 원본 한계치가 아니라 **이미 승인된 이전 범위**를 기준으로 다음 제안을 좁혀야 하기 때문입니다 — 그렇지 않으면 이전 승인보다 느슨한 제안이 나와 조용히 이전 결정을 무효화할 수 있습니다.
 
@@ -219,7 +219,7 @@ CIM 칩의 실제 동작을 검증하는 방법은 두 극단이 있습니다.
 
 ### 10.10 탐색을 뒷받침하는 두 도구 — `tools/search.py`와 `tools/batch_warmup.py`
 
-**`tools/search.py`가 왜 무거운 의존성(`pymoo`)까지 들여왔는가**: 이 프로젝트는 보통 최소 의존성을 지향하지만(docs/coding_guidelines.md 2), 다중목적 탐색만큼은 직접 만든 단일목적 UCB 스캔을 세 목적으로 억지로 늘리는 대신, 검증된 실제 다중목적 알고리즘(NSGA-II)을 쓰는 쪽을 의도적으로 택했습니다 — 실제로 이전 버전(정확도만 대리모델링하고 에너지/지연은 사후 랭킹에만 쓰던 버전)이 사실상 단일목적으로 동작한다는 걸 실측 로그로 확인한 뒤의 교체였습니다.
+**`tools/search.py`가 왜 무거운 의존성(`pymoo`)까지 들여왔는가**: 이 프로젝트는 보통 최소 의존성을 지향하지만, 다중목적 탐색만큼은 직접 만든 단일목적 UCB 스캔을 세 목적으로 억지로 늘리는 대신, 검증된 실제 다중목적 알고리즘(NSGA-II)을 쓰는 쪽을 의도적으로 택했습니다 — 실제로 이전 버전(정확도만 대리모델링하고 에너지/지연은 사후 랭킹에만 쓰던 버전)이 사실상 단일목적으로 동작한다는 걸 실측 로그로 확인한 뒤의 교체였습니다.
 
 **왜 랜덤/단일목적 전략(`search_strategy`)이 코드에 남아 있는가**: `tools/run_ablation.py`가 "탐색이 낫다"를 그냥 주장하는 대신 실제로 비교할 수 있도록 하기 위한 대조군입니다 — `random`(대리모델 없음), `single_objective`(이전에 실제로 배포됐던 정확도 전용 UCB), `multi_objective`(현재 기본값) 세 전략이 똑같은 워밍업에서 시작해 acquisition 단계만 다르게 갈라지도록 만들어, 비교가 공정하게(같은 조건에서만 다르게) 이뤄지게 했습니다.
 
@@ -273,4 +273,4 @@ CIM 칩의 실제 동작을 검증하는 방법은 두 극단이 있습니다.
 
 - [`README.md`](../README.md) — 실제 구현 여부, 스코프 한계, 실측으로 확인한 결과
 - [`docs/research_plan.md`](research_plan.md) — 최초 기획 의도(일부 구현과 다를 수 있음, README 우선)
-- [`docs/coding_guidelines.md`](../docs/coding_guidelines.md) — 이 코드베이스에서 코드를 작성/수정할 때의 규칙
+- [`docs/coding_guidelines.md`](coding_guidelines.md) — 이 코드베이스에서 코드를 작성/수정할 때의 규칙

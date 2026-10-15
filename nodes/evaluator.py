@@ -30,7 +30,7 @@ no basis to rank itself against candidates it never saw. @planner reads
 
 MAX_RETRY_LIMIT is a control-flow constant (loop-termination policy), not a
 hardware parameter, so it is defined here rather than sourced from
-`HWConfig` -- docs/coding_guidelines.md 5.C only prohibits hardcoding hardware specs.
+`HWConfig` -- docs/coding_guidelines.md C only prohibits hardcoding hardware specs.
 """
 
 from typing import Any, Dict, List, Literal, Optional

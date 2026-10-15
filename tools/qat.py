@@ -32,7 +32,7 @@ Scope, stated plainly:
   model and each batch to `_resolve_device`'s result -- an explicit
   `TESSELLATE_QAT_DEVICE` override, else auto-detected (CUDA, then Apple
   MPS, then CPU) -- never hardcoded to assume a GPU exists, since most
-  CI/dev machines don't (docs/coding_guidelines.md 5.C). `get_qat_backend`'s cached
+  CI/dev machines don't (docs/coding_guidelines.md C). `get_qat_backend`'s cached
   `base_model`/loaders stay on CPU regardless -- only the per-trial deep
   copy moves, so the shared cache is never pinned to one device.
 - `_MODEL_REGISTRY` ships three built-in entries: "resnet18" (torchvision,
@@ -45,7 +45,7 @@ Scope, stated plainly:
   to this file -- a `"module.path:function_name"` import spec (a
   caller's own architecture, defined in their own module) matching
   `Callable[[int], nn.Module]`, same contract as the built-ins
-  (docs/coding_guidelines.md 5.C "Model Agnostic": arbitrary `nn.Module` support, not
+  (docs/coding_guidelines.md C "Model Agnostic": arbitrary `nn.Module` support, not
   just three hardcoded names).
 - Datasets are the same two-tier story via `_DATASET_REGISTRY`: the
   built-in `"cifar10"` (default when `dataset_id` is omitted), a
@@ -73,7 +73,7 @@ Scope, stated plainly:
   `_TEST_SIZE`/`_BATCH_SIZE`, or train for longer per candidate via
   `TESSELLATE_QAT_MAX_EPOCHS` (`resolve_max_epochs`, the single source of truth
   `nodes/tuner.py`/`tools/batch_warmup.py` both call), without a code
-  change (docs/coding_guidelines.md 5.C). Whatever
+  change (docs/coding_guidelines.md C). Whatever
   the configured sizes, `_DEFAULT_TRAIN_SIZE`/`_VAL_SIZE`/`_TEST_SIZE` are a
   genuine three-way split (see `QATBackend`'s docstring): training and
   early-stopping never touch the test set that `run_qat_tuning`
@@ -271,7 +271,7 @@ class _PartialSumQuant:
     channel happens to run hottest.
 
     `adc_bits` is `HWConfig.adc_bits` -- a fixed physical property of the
-    chip (docs/coding_guidelines.md 5.C: never hardcoded, always sourced from HWConfig),
+    chip (docs/coding_guidelines.md C: never hardcoded, always sourced from HWConfig),
     not a per-stage value `@planner`'s search tunes the way weight_bits is.
     A single crossbar's ADC serves every column of that array the same
     way; there's no per-stage knob to turn here in real hardware, so
@@ -320,7 +320,7 @@ def apply_crossbar_quant_prune(
 
 
 # ---------------------------------------------------------------------------
-# Device selection (docs/coding_guidelines.md 5.C: config-driven, never hardcoded)
+# Device selection (docs/coding_guidelines.md C: config-driven, never hardcoded)
 # ---------------------------------------------------------------------------
 
 _DEVICE_ENV = "TESSELLATE_QAT_DEVICE"
@@ -526,7 +526,7 @@ def _import_callable(spec: str, *, kind: str) -> Callable:
     """Resolves a `"module.path:attr_name"` spec to the callable it names
     -- shared by `_resolve_model_builder`/`_resolve_dataset_loader` below,
     the two places this project lets a caller plug in their own code
-    without editing this file (docs/coding_guidelines.md 5.C). `kind` ("model"/"dataset")
+    without editing this file (docs/coding_guidelines.md C). `kind` ("model"/"dataset")
     only shapes the error message."""
     module_path, sep, attr_name = spec.rpartition(":")
     if not sep or not module_path or not attr_name:
@@ -644,7 +644,7 @@ def get_stage_weight_shapes(
 # +/-8pp down to roughly +/-3pp -- the earlier size was too small to treat
 # as more than a rough directional signal between candidates.
 #
-# These were hardcoded module constants (docs/coding_guidelines.md 5.C: config-driven, not
+# These were hardcoded module constants (docs/coding_guidelines.md C: config-driven, not
 # hardcoded) -- a deployment validating against its *real* target dataset
 # rather than this demo subset had no way to widen scope without editing
 # this file. Now env-var overridable (same pattern as llm.py's

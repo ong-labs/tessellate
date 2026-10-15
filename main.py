@@ -1,7 +1,7 @@
 """Tessellate CLI entrypoint.
 
 Boots one TessellateState session, injects ExecutionContext/HWConfig at the
-config-loading boundary (docs/coding_guidelines.md 5.C -- node/tool logic never hardcodes
+config-loading boundary (docs/coding_guidelines.md C -- node/tool logic never hardcodes
 these), streams node execution via `graph.stream()`, and on a dynamic
 `interrupt()` (checklist item 1) prompts the researcher for an override and
 resumes the same thread with `Command(resume={"new_bounds": ...})`.
@@ -1847,7 +1847,7 @@ def run_session(
             return
         # Safe resume: only the dynamic interrupt()'s return value carries
         # this back into hitl_node -- no graph.update_state() call here that
-        # could duplicate it (checklist item 1 / docs/coding_guidelines.md 5.B).
+        # could duplicate it (checklist item 1 / docs/coding_guidelines.md B).
         resumable_input = Command(resume=override)
 
     print("\n=== Session finished ===")

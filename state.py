@@ -2,7 +2,7 @@
 
 Reducers here exist to make parallel fan-in (mapper/profiler -> verifier)
 safe: each node writes only into its own namespace of `metrics_store`, so
-concurrent updates never overwrite each other (see docs/coding_guidelines.md 5.A).
+concurrent updates never overwrite each other (see docs/coding_guidelines.md A).
 
 `candidate_history` uses the same append-only `operator.add` reducer as
 `failure_history`: @evaluator appends one entry per fully-evaluated
@@ -35,7 +35,7 @@ stayed uncalibrated (factor 1.0), same honesty rule as
 a researcher has approved so far this session (nodes/planner.py merges each
 newly-consumed `human_overrides` into it via the same `merge_dicts` reducer).
 Unlike `human_overrides` itself -- which nodes/planner.py clears the same
-step it reads it (checklist item 3 / docs/coding_guidelines.md 5.A), so the same HITL
+step it reads it (checklist item 3 / docs/coding_guidelines.md A), so the same HITL
 interrupt doesn't re-fire forever -- the *bounds* a researcher already
 approved keep constraining every later candidate's `search_bounds()` for the
 rest of the run, not just the one candidate right after approval. A later

@@ -1,6 +1,6 @@
 """Chat-model factory + call-operations for Tessellate's LLM-backed nodes.
 
-Provider/model choice is config-driven, mirroring docs/coding_guidelines.md 5.C's "load
+Provider/model choice is config-driven, mirroring docs/coding_guidelines.md C's "load
 hardware specs via HWConfig, never hardcode" principle at the LLM boundary:
 defaults to a local Ollama model (_DEFAULT_LOCAL_MODEL) so a fresh checkout
 never has to send hardware specs or candidate configs to a cloud API just to
@@ -145,7 +145,7 @@ def get_fallback_chat_model() -> Optional[BaseChatModel]:
 # Retry/backoff + usage tracking around real LLM calls
 # =============================================================================
 
-# Operational policy constants, not hardware specs (docs/coding_guidelines.md 5.C only
+# Operational policy constants, not hardware specs (docs/coding_guidelines.md C only
 # prohibits hardcoding hardware numbers) -- still env-overridable so a
 # deployment can tune retry/backoff without a code change, same spirit as
 # TESSELLATE_PLANNER_MODEL above.

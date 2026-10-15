@@ -1,4 +1,4 @@
-"""Stage-2 CIM verification (docs/coding_guidelines.md 5.D "Mock First" -- graduating in
+"""Stage-2 CIM verification (docs/coding_guidelines.md D "Mock First" -- graduating in
 place): the ADC energy term is a real, literature-fit model
 (`hwcomponents_adc`, https://arxiv.org/abs/2404.06553); DAC and crossbar-MAC
 energy are now real NeuroSim device models (`hwcomponents_neurosim`) too,
@@ -204,7 +204,7 @@ def _clamped_cacti_tech_node_m(tech_node_nm: Optional[float]) -> float:
 def _real_adc_conversion_energy_fj(hw: HWConfig) -> Optional[float]:
     """One real ADC conversion's energy (femtojoules), from
     `hwcomponents_adc`'s literature-fit model (arXiv:2404.06553) -- `n_bits`
-    comes directly from `hw.adc_bits` (never hardcoded, docs/coding_guidelines.md 5.C).
+    comes directly from `hw.adc_bits` (never hardcoded, docs/coding_guidelines.md C).
     `throughput` is derived from `tools.cim_physics.CIM_TECH_PARAMS`'s
     existing `adc_cycle_time_ns` (the same per-bit SAR-ADC timing the
     analytical model already assumes) rather than a second, disconnected
@@ -446,7 +446,7 @@ def _call_docker_precision_bridge(
     the daemon not running, a timeout, or a malformed response) returns
     `None` so `simulate_precise_energy` falls back to its own already-
     existing per-term analytical/real split exactly as if the bridge were
-    never attempted -- docs/coding_guidelines.md 5.D's `wrap_tool_call` contract (never
+    never attempted -- docs/coding_guidelines.md D's `wrap_tool_call` contract (never
     break the agent loop over a backend tool's exception) applies here too,
     one level up from the individual `_real_*_fj` functions that already
     follow it for a missing package."""

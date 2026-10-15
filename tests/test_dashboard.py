@@ -185,7 +185,7 @@ def test_calibration_section_shows_precision_verified_status_distinctly_from_a_l
     """nodes/precision_verifier.py's own calibration_provenance update
     (`"precision_verified": True`) must render as calibrated, but must never
     be confused with a real published-reference match (previous test) --
-    it's a Mock First (docs/coding_guidelines.md 5.D) placeholder re-check, not a citation."""
+    it's a Mock First (docs/coding_guidelines.md D) placeholder re-check, not a citation."""
     state = state_factory(
         hw_spec_id="precision_checked_hw",
         calibration_factors={"precision_checked_hw": 1.05},

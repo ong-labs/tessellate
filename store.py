@@ -16,7 +16,7 @@ them into a run that computes energy differently -- see that constant's
 comment for the real incident this prevents. Entries that carry no energy
 number (`sensitivity_profile`, `noc_delay_rulebase`) keep their plain keys.
 
-`InMemoryLongTermStore` is a Mock-First (docs/coding_guidelines.md 5.D) backend for
+`InMemoryLongTermStore` is a Mock-First (docs/coding_guidelines.md D) backend for
 development; swap in a persistent/vector-backed `BaseLongTermStore`
 implementation later without changing `ModelSpecificStore`/`GlobalHWStore`
 or any node/tool code that depends on them.
@@ -113,7 +113,7 @@ class SqliteLongTermStore(BaseLongTermStore):
     approach as `InMemoryLongTermStore`) -- fine at this project's data
     volume (one row per model_id/hw_spec_id, not millions), and avoids a
     new vector-DB dependency for what's still a Mock-First-scoped feature
-    (docs/coding_guidelines.md 5.D)."""
+    (docs/coding_guidelines.md D)."""
 
     def __init__(self, db_path: Union[str, Path]) -> None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)

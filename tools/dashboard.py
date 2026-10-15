@@ -580,7 +580,7 @@ def _calibration_section_html(state: TessellateState) -> str:
     analytical fast-approximation (`tools.cim_physics`) -- the honest stand-
     in for "precise simulator vs fast-approximation error margin" this
     project can actually make, given @mapper/@profiler don't bind a real
-    NeuroSim/CIM-Loop instance (docs/coding_guidelines.md 5.D Mock First). Uncalibrated is
+    NeuroSim/CIM-Loop instance (docs/coding_guidelines.md D Mock First). Uncalibrated is
     not an error state -- it's the expected case for any hw_spec_id that
     doesn't exactly match a known reference -- but it belongs on the
     dashboard, not buried in a code comment, since it directly bears on how
@@ -682,7 +682,7 @@ def _run_config_section_html(state: TessellateState, hw_config: Optional[HWConfi
     state because `TessellateState` carries the id, not the resolved spec
     (main.py's `write_dashboard` resolves it through middleware's registry);
     when it can't be resolved the section degrades to the ids alone and says
-    so, rather than inventing values (docs/coding_guidelines.md 5.C)."""
+    so, rather than inventing values (docs/coding_guidelines.md C)."""
     dataset = state.get("dataset_id")
     workload = [
         _spec_cell("Model", "대상 모델", html.escape(str(state.get("model_id")))),

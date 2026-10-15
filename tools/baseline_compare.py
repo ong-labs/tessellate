@@ -72,7 +72,7 @@ def naive_baseline_layer_configs(
     column_pruning_ratio: float = _DEFAULT_BASELINE_PRUNING_RATIO,
 ) -> List[LayerBitConfig]:
     """One `LayerBitConfig` per real stage (`nodes.planner.real_stage_names`
-    -- never a hardcoded stage list, docs/coding_guidelines.md 5.C), all set to the same
+    -- never a hardcoded stage list, docs/coding_guidelines.md C), all set to the same
     fixed values: the "didn't search at all, picked an unremarkable
     default" reference point every stage of this model would plausibly get
     from a human who spent zero optimization effort."""

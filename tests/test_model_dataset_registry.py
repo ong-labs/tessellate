@@ -1,5 +1,5 @@
 """tools/qat.py: runtime model/dataset registration + "module:function"
-custom specs (docs/coding_guidelines.md 5.C "Model Agnostic" -- @tuner must handle
+custom specs (docs/coding_guidelines.md C "Model Agnostic" -- @tuner must handle
 arbitrary nn.Module/datasets, not just the three built-in model_ids).
 
 No network/download involved: every custom builder/loader here is a tiny

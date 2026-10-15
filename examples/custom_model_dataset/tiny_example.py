@@ -1,4 +1,4 @@
-"""Example custom --model-id/--dataset-id target (docs/coding_guidelines.md 5.C "Model
+"""Example custom --model-id/--dataset-id target (docs/coding_guidelines.md C "Model
 Agnostic"): proves a user's own architecture/dataset plugs into
 Tessellate with zero changes to this repo, via tools/qat.py's
 "module.path:function_name" spec.

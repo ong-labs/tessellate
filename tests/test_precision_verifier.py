@@ -1,6 +1,6 @@
 """@precision_verifier node + precision_check_tool: mock Stage-2
 high-fidelity re-check that graph.py now routes @evaluator's own
-"Converged (Done)" edge through before a real END (docs/coding_guidelines.md 5.D Mock
+"Converged (Done)" edge through before a real END (docs/coding_guidelines.md D Mock
 First -- see nodes/precision_verifier.py's docstring)."""
 
 from middleware import set_execution_context

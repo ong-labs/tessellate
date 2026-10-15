@@ -4,7 +4,7 @@ Every backend tool (@tuner, @mapper, @profiler, @verifier) is validated
 through `wrap_tool_call` using the models below. Inputs carry
 an `ExecutionContext` + `HWConfig` pair instead of hardcoded model/hardware
 values, and outputs share a common envelope so they merge cleanly into
-`TessellateState.metrics_store` (see docs/coding_guidelines.md 5.A/5.C).
+`TessellateState.metrics_store` (see docs/coding_guidelines.md A/5.C).
 """
 
 from enum import Enum
@@ -124,7 +124,7 @@ class VerifierToolOutput(ToolResult):
 
 # --- @precision_verifier: mock Stage-2 high-fidelity re-check --------------
 #
-# docs/coding_guidelines.md 5.D Mock First: tools/precision_check.py's computation is a
+# docs/coding_guidelines.md D Mock First: tools/precision_check.py's computation is a
 # clearly-labeled placeholder, not a real NeuroSim/CIM-Loop call -- this
 # schema is the real interface that call will eventually fill, defined now
 # so the graph routing/state-flow around it (nodes/precision_verifier.py,

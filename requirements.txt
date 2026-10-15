@@ -43,7 +43,7 @@ pymoo==0.6.2
 # surrogate's predictions, not real trials) -- see that module's docstring.
 optuna==4.9.0
 # tools/precision_check.py's real ADC energy model (Stage-2 verification,
-# docs/coding_guidelines.md 5.D "Mock First" graduating in place) -- pure Python, literature-
+# docs/coding_guidelines.md D "Mock First" graduating in place) -- pure Python, literature-
 # fit against real published ADC designs (arXiv:2404.06553). hwcomponents-
 # neurosim/-cacti (the fuller alternatives) were evaluated and rejected:
 # -neurosim compiles NeuroSim's real C++ source via make/g++ at install
@@ -69,5 +69,5 @@ python-dotenv==1.2.1
 pytest==9.1.1
 # Lint-only (ci.yml's "Lint" step) -- no runtime import anywhere, catches
 # unused imports/variables and other style regressions that pytest alone
-# doesn't (docs/coding_guidelines.md gap: CI previously had no lint/type-check step at all).
+# doesn't (CI previously had no lint/type-check step at all).
 ruff==0.15.4

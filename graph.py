@@ -14,7 +14,7 @@ START -> planner -> tuner -> (mapper, profiler fan-out) -> verifier -> evaluator
                                                     |    (or: Concluded (low conf) -> END)                  |
                                                     +-> planner                                             +--> Converged (Done) -> END
 
-@precision_verifier (mock Stage-2 high-fidelity re-check, docs/coding_guidelines.md 5.D Mock
+@precision_verifier (mock Stage-2 high-fidelity re-check, docs/coding_guidelines.md D Mock
 First) sits between @evaluator's fast-approximation convergence call and a
 real `END` -- @evaluator's own "Converged (Done)" routes here first instead
 of straight to `END`, and this node re-routes through the exact same three
@@ -24,7 +24,7 @@ verdict. Only a candidate the fast approximation already thinks is done
 ever reaches this node -- never every candidate a search tries.
 
 HITL pausing uses only the dynamic `interrupt()` call inside `hitl_node`
-(checklist item 1 / docs/coding_guidelines.md 5.B) -- `workflow.compile()` below must never
+(checklist item 1 / docs/coding_guidelines.md B) -- `workflow.compile()` below must never
 be given `interrupt_before`/`interrupt_after`. `hitl_human_approval`'s own
 outgoing edge is conditional (`hitl_router`): a normal resume (new search
 bounds) still goes to `planner`, but `main.py`'s auto-hitl giving up after

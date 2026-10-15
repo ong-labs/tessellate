@@ -3,7 +3,7 @@
 `workflow.compile()` in graph.py must never register static
 interrupt_before/interrupt_after nodes; pausing happens exclusively via the
 dynamic `interrupt()` call inside hitl_node, and resuming happens exclusively
-via `Command(resume=...)` -- never `graph.update_state()` (docs/coding_guidelines.md 5.B).
+via `Command(resume=...)` -- never `graph.update_state()` (docs/coding_guidelines.md B).
 """
 
 import inspect

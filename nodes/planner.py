@@ -39,7 +39,7 @@ This module also owns the state-sanitization contract every other node
 depends on: when `human_overrides` was just produced by `hitl_node`,
 consume it and reset `needs_hitl`/`retry_count` in the same step so it
 doesn't re-trigger the same HITL interrupt forever (checklist item 3 /
-docs/coding_guidelines.md 5.A). Only the transient `human_overrides`/`needs_hitl`/
+docs/coding_guidelines.md A). Only the transient `human_overrides`/`needs_hitl`/
 `retry_count` signal is reset this way -- the bounds themselves are merged
 into `search_bound_overrides` (state.py) in the same step, and every
 `search_bounds()` call below reads that persisted, merged dict, not
@@ -93,7 +93,7 @@ _FALLBACK_STAGE_NAME = "model_default"
 # to; deriving it from the class avoids the two ever drifting apart.
 _TOOL_NAME = PlannerLayerDecision.__name__
 
-# Search-space policy constants (not hardware specs -- docs/coding_guidelines.md 5.C only
+# Search-space policy constants (not hardware specs -- docs/coding_guidelines.md C only
 # prohibits hardcoding hardware numbers, and the upper bit-width bound below
 # is still derived from HWConfig, never a literal).
 #

@@ -1,5 +1,5 @@
 """@precision_verifier node: mock Stage-2 high-fidelity re-verification
-(docs/coding_guidelines.md 5.D Mock First).
+(docs/coding_guidelines.md D Mock First).
 
 `graph.py` routes @evaluator's "Converged (Done)" edge here instead of
 straight to `END` -- this node only ever runs on a candidate the fast-
@@ -74,7 +74,7 @@ def precision_verifier_node(state: TessellateState) -> Dict[str, Any]:
     # `"precision_verified": True` keeps this branch distinguishable from a
     # real literature-reference match (`describe_calibration`) or the
     # nearest-neighbor scaling-law fallback (`describe_approximate_calibration`,
-    # `"approximate": True`) -- this one is a Mock First (docs/coding_guidelines.md 5.D)
+    # `"approximate": True`) -- this one is a Mock First (docs/coding_guidelines.md D)
     # placeholder re-check, not a citation.
     calibration_provenance = (
         {

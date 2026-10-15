@@ -1,6 +1,6 @@
 """hitl_human_approval node.
 
-Uses LangGraph's v0.2+ dynamic `interrupt()` standard (docs/coding_guidelines.md 5.B):
+Uses LangGraph's v0.2+ dynamic `interrupt()` standard (docs/coding_guidelines.md B):
 no `interrupt_before` in `compile()`, and no `graph.update_state()` call
 here that would duplicate the state update `interrupt()`'s return value
 already provides on resume (`Command(resume=...)`).

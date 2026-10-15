@@ -15,7 +15,7 @@ def default_layer_configs(hw_spec_id: str) -> List[LayerBitConfig]:
     proposal yet, and by @planner itself as the fallback when its LLM call
     fails -- one implementation so both fallback paths agree. Bit-width is
     bounded by the target hardware's converter resolution (`HWConfig.adc_bits`)
-    rather than a hardcoded value (docs/coding_guidelines.md 5.C).
+    rather than a hardcoded value (docs/coding_guidelines.md C).
     """
     try:
         baseline_bits = min(8, get_hw_config(hw_spec_id).adc_bits)
