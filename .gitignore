@@ -54,11 +54,6 @@ venv/
 .vscode/
 .idea/
 
-# Local tool settings. Both files are permissions/tool config for whoever
-# is sitting at the machine, not a project decision, so neither is shared.
-.config/settings.local.json
-.config/settings.json
-
 # Local-only presenter notes
 presentation/qa_cards.html
 
@@ -75,5 +70,3 @@ notebooks/demo_dashboard.html
 # events.jsonl and the generated report are what is actually kept.
 runs/**/checkpoints.sqlite
 
-# Agent instructions -- local only
-docs/coding_guidelines.md
