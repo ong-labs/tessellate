@@ -4,7 +4,6 @@
 __pycache__/
 **/__pycache__/
 *.pyc
-.config/
 scratch_qat_test/
 
 # Secrets: COPY . . would otherwise bake a real .env.local (API keys) or any
